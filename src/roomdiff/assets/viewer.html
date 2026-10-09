@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>roomdiff viewer</title>
+<style>
+  :root { --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e2e0db;
+          --removed: #D55E00; --added: #0072B2; --moved: #CC79A7; --unverified: #8a8a8a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+               font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #app { display: flex; height: 100%; }
+  #view { flex: 1; position: relative; min-width: 0; }
+  #view canvas { display: block; }
+  #panel { width: 340px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 16px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .modes { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .modes button { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  .modes button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .change { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+  .change:hover { border-color: var(--muted); }
+  .tag { display: inline-block; min-width: 22px; text-align: center; font-weight: 700; color: #fff; border-radius: 4px; padding: 0 5px; margin-right: 6px; }
+  .removed .tag { background: var(--removed); } .added .tag { background: var(--added); }
+  .moved .tag { background: var(--moved); } .unverified .tag { background: var(--unverified); }
+  .meta { color: var(--muted); font-size: 12px; }
+  #legend { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,0.9); border: 1px solid var(--line);
+            border-radius: 8px; padding: 6px 10px; font-size: 12px; }
+  #legend span { margin-right: 10px; }
+  @media (max-width: 760px) { #app { flex-direction: column; } #panel { width: 100%; height: 45%; border-left: 0; border-top: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="view"><div id="legend"></div></div>
+  <div id="panel">
+    <h1>What changed in the room</h1>
+    <div class="sub" id="summary"></div>
+    <div class="modes" id="modes"></div>
+    <div id="list"></div>
+  </div>
+</div>
+<script>/*THREE*/</script>
+<script>/*ORBIT*/</script>
+<script>
+const DATA = /*DATA*/;
+const STYLE = { removed: ['#D55E00', '−'], added: ['#0072B2', '+'], moved: ['#CC79A7', '→'], unverified: ['#8a8a8a', '?'] };
+
+function decode(b64, Type) {
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Type(bytes.buffer);
+}
+
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf6f5f2);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
+camera.up.set(0, 0, 1);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+function cloud(part, tint) {
+  const xyz = decode(part.xyz, Float32Array), rgb = decode(part.rgb, Uint8Array);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(xyz, 3));
+  const col = new Float32Array(rgb.length);
+  for (let i = 0; i < rgb.length; i++) col[i] = rgb[i] / 255;
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const m = new THREE.PointsMaterial({ size: 0.018, vertexColors: true, transparent: true, opacity: 1 });
+  const p = new THREE.Points(g, m);
+  scene.add(p);
+  return p;
+}
+const before = cloud(DATA.points.before), after = cloud(DATA.points.after);
+
+function boxLines(b, color) {
+  const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]));
+  const mat = new THREE.LineBasicMaterial({ color, linewidth: 2 });
+  const l = new THREE.LineSegments(geo, mat);
+  l.position.set(b.center[0], b.center[1], b.center[2]);
+  l.rotation.z = b.yaw;
+  scene.add(l);
+  return l;
+}
+const groups = DATA.changes.map(c => {
+  const color = STYLE[c.status === 'unverified' ? 'unverified' : c.type][0];
+  const g = [];
+  if (c.box_before) g.push(boxLines(c.box_before, color));
+  if (c.box_after) g.push(boxLines(c.box_after, color));
+  return g;
+});
+
+const MODES = { Before: [1, 0], After: [0, 1], Both: [1, 1] };
+const modes = document.getElementById('modes');
+function setMode(name) {
+  const [b, a] = MODES[name];
+  before.visible = !!b; after.visible = !!a;
+  [...modes.children].forEach(x => x.classList.toggle('on', x.textContent === name));
+}
+Object.keys(MODES).forEach(n => { const btn = document.createElement('button'); btn.textContent = n; btn.onclick = () => setMode(n); modes.appendChild(btn); });
+setMode('Both');
+
+document.getElementById('summary').textContent = DATA.summary;
+document.getElementById('legend').innerHTML = Object.entries(STYLE).map(([k, [c, g]]) => `<span style="color:${c}"><b>${g}</b> ${k}</span>`).join('');
+const list = document.getElementById('list');
+DATA.changes.forEach((c, i) => {
+  const kind = c.status === 'unverified' ? 'unverified' : c.type;
+  const div = document.createElement('div');
+  div.className = 'change ' + kind;
+  div.innerHTML = `<div><span class="tag">${STYLE[kind][1]}</span><b>#${c.id} ${c.label}</b> <span class="meta">${c.type}, ${c.status}</span></div>` +
+                  `<div>${c.sentence}</div>`;
+  div.onclick = () => { const b = c.box_after || c.box_before; controls.target.set(...b.center); camera.position.set(b.center[0] + 1.5, b.center[1] - 1.5, b.center[2] + 1.2); };
+  list.appendChild(div);
+});
+
+const c0 = DATA.view_center;
+controls.target.set(c0[0], c0[1], c0[2]);
+camera.position.set(c0[0] + DATA.view_radius, c0[1] - DATA.view_radius, c0[2] + DATA.view_radius * 0.9);
+
+function resize() { const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+window.addEventListener('resize', resize); resize();
+(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+</script>
+</body>
+</html>

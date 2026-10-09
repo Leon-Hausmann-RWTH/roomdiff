@@ -1,0 +1,42 @@
+[project]
+name = "roomdiff"
+version = "0.1.0"
+description = "Find what was moved, added or removed between two phone videos of a room, in 3D."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "av>=14",
+    "huggingface-hub>=0.30",
+    "numpy>=1.26",
+    "pi3",
+    "pillow>=10",
+    "safetensors>=0.4",
+    "scipy>=1.13",
+    "torch>=2.14.1",
+    "torchvision>=0.29",
+    "transformers>=4.56",
+    "tyro>=0.9",
+]
+
+[project.scripts]
+roomdiff = "roomdiff.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.8"]
+
+[tool.uv.sources]
+pi3 = { git = "https://github.com/yyfz/Pi3", rev = "9fa3ddb3f8d53041f8b2738df404f62223bbaa7b" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "NPY"]
+ignore = ["B905"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
