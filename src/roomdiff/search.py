@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from .config import Config
+from .config import Config, free_device
 from .evidence import SEEN
 from .geometry import Cloud, Views, backproject
 from .moves import Motion, footprint_motion, register
@@ -10,8 +10,8 @@ from .objects import (
     DINO_REPO,
     DINO_REVISION,
     Obj,
+    body,
     describe,
-    free_device,
     hires,
     lift,
     sam_masks,
@@ -55,13 +55,16 @@ def patch_points(views: Views, rows: int, cols: int) -> np.ndarray:
     return out
 
 
-def descriptor(o: Obj, feats: np.ndarray) -> np.ndarray:
+def descriptor(o: Obj, feats: np.ndarray) -> np.ndarray | None:
+    """Mean patch feature inside the object's masks; None if no mask covers a whole patch."""
     rows, cols = feats.shape[1:3]
     parts = []
     for i, m in o.masks.items():
         small = np.asarray(Image.fromarray(m).resize((cols, rows), Image.Resampling.BOX)) > 0.4
         if small.any():
             parts.append(feats[i][small].astype(np.float32).mean(0))
+    if not parts:
+        return None
     f = np.mean(parts, 0)
     return f / np.linalg.norm(f)
 
@@ -79,8 +82,10 @@ def find_other_ends(
     pts = [patch_points(views[s], *feats[s].shape[1:3]) for s in (0, 1)]
     found, prompts, owners = [], {}, {}
     for o in lonely:
-        t = 1 - o.side
-        sim = feats[t].astype(np.float32) @ descriptor(o, feats[o.side])  # (N, rows, cols)
+        t, d = 1 - o.side, descriptor(o, feats[o.side])
+        if d is None:
+            continue
+        sim = feats[t].astype(np.float32) @ d  # (N, rows, cols)
         centre = clouds[o.side].xyz[o.idx].mean(0)
         far = np.linalg.norm((pts[t] - centre)[..., :2], axis=-1) > 0.4
         sim = np.where(far & ~np.isnan(pts[t][..., 0]), sim, -1)
@@ -117,9 +122,8 @@ def find_other_ends(
             cand = Obj(t, inside, inside, {i: m})
             lift(cand, cloud, views[t])
             # The first video must not have seen the object standing there; then it would not have moved.
-            z = cloud.xyz[cand.idx, 2]
-            body = cand.idx[z > z.min() + min(0.10, max(0.03, 0.3 * float(np.ptp(z))))]
-            if len(body) == 0 or np.mean(states[t][body] == SEEN) >= 0.5:
+            core = body(cand.idx, cloud)
+            if len(core) == 0 or np.mean(states[t][core] == SEEN) >= 0.5:
                 continue
             describe([cand], images, device)
             ha, hb = (np.ptp(clouds[x.side].xyz[x.idx][:, 2]) + 0.02 for x in (o, cand))
@@ -130,9 +134,8 @@ def find_other_ends(
             m_ = register(src, dst)
             m_ = m_ if m_.fit >= cfg.min_fit else footprint_motion(src, dst)
             if m_.distance >= cfg.min_move:
-                cand.status = o.status
-                cand.reason = (
-                    "its place was never filmed by the " + ("before" if t == 1 else "after") + " video"
-                )
+                cand.status, cand.shares = o.status, o.shares
+                end, other = ("new", "before") if o.side == 0 else ("old", "after")
+                o.reason += f"; its {end} place was never filmed by the {other} video"
                 found.append((a, b, m_))
     return found

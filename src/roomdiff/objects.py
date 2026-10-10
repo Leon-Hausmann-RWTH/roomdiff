@@ -1,4 +1,3 @@
-import gc
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -6,7 +5,7 @@ import torch
 from PIL import Image
 from scipy.ndimage import binary_erosion
 
-from .config import Config
+from .config import Config, free_device
 from .evidence import FREE, OCCLUDED, SEEN, UNREACHED, Evidence, point_states
 from .geometry import Cloud, Views, project
 
@@ -53,14 +52,6 @@ def best_frames(xyz: np.ndarray, views: Views, k: int = 3, min_points: int = 8) 
 def hires(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     # Keyframe images are twice the reconstruction size; pixel centres map as 2x + 0.5.
     return np.stack([2 * u + 0.5, 2 * v + 0.5], -1)
-
-
-def free_device(device: torch.device) -> None:
-    gc.collect()
-    if device.type == "mps":
-        torch.mps.empty_cache()
-    elif device.type == "cuda":
-        torch.cuda.empty_cache()
 
 
 def sam_masks(jobs: dict[tuple[int, int], list[np.ndarray]], images, device) -> dict:
@@ -210,16 +201,22 @@ def describe(objs: list[Obj], images, device) -> None:
     free_device(device)
 
 
+def body(idx: np.ndarray, cloud: Cloud) -> np.ndarray:
+    """The object's points above its contact zone.
+
+    The lowest part touches the support, which is still there, and tests as seen up to roughly the
+    depth band times the sine of the viewing angle: up to about 10 cm.
+    """
+    z = cloud.xyz[idx, 2]
+    contact = min(0.10, max(0.03, 0.3 * float(np.ptp(z))))
+    return idx[z > z.min() + contact] if np.ptp(z) > 0.06 else idx
+
+
 def verdict(o: Obj, cloud: Cloud, ev: Evidence, cfg: Config) -> None:
     """Confirmed only where the other video positively saw free space; otherwise say why not."""
-    z = cloud.xyz[o.idx, 2]
-    # The lowest part of an object touches its support, which is still there, and tests as seen up to
-    # roughly the depth band times the sine of the viewing angle: up to about 10 cm.
-    contact = min(0.10, max(0.03, 0.3 * float(np.ptp(z))))
-    body = o.idx[z > z.min() + contact] if np.ptp(z) > 0.06 else o.idx
-    state = point_states(ev, cfg)[body]
+    state = point_states(ev, cfg)[body(o.idx, cloud)]
     names = (("free", FREE), ("seen", SEEN), ("occluded", OCCLUDED), ("unreached", UNREACHED))
-    o.shares = {k: round(float(np.mean(state == s)), 3) for k, s in names} | {"points": int(len(body))}
+    o.shares = {k: round(float(np.mean(state == s)), 3) for k, s in names} | {"points": int(len(state))}
     decided = o.shares["free"] + o.shares["seen"]
     ratio = o.shares["free"] / max(decided, 1e-9)
     other = "after" if o.side == 0 else "before"

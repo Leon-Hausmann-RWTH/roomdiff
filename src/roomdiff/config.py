@@ -1,3 +1,4 @@
+import gc
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,3 +76,12 @@ def pick_device(name: str = "auto") -> torch.device:
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+
+
+def free_device(device: torch.device) -> None:
+    # Models run one after another; return each one's memory before loading the next.
+    gc.collect()
+    if device.type == "mps":
+        torch.mps.empty_cache()
+    elif device.type == "cuda":
+        torch.cuda.empty_cache()

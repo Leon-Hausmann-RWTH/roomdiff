@@ -1,0 +1,187 @@
+{
+ "before": "before.mp4",
+ "after": "after.mp4",
+ "units": "metres, z up, floor at z = 0",
+ "camera_height_m": 1.53,
+ "counts": {
+  "moved": 1,
+  "added": 2,
+  "removed": 0,
+  "unverified": 0
+ },
+ "changes": [
+  {
+   "id": 1,
+   "type": "moved",
+   "status": "confirmed",
+   "reason": "the after video looked through 96 % of the points it could check",
+   "label": "plastic bag",
+   "label_score": 0.839,
+   "sentence": "The plastic bag moved 0.3 m along the desk.",
+   "box_before": {
+    "center": [
+     -0.164,
+     -0.401,
+     0.919
+    ],
+    "size": [
+     0.41,
+     0.316,
+     0.139
+    ],
+    "yaw": 1.771
+   },
+   "box_after": {
+    "center": [
+     0.11,
+     -0.549,
+     0.955
+    ],
+    "size": [
+     0.43,
+     0.375,
+     0.211
+    ],
+    "yaw": 1.72
+   },
+   "motion": {
+    "distance_m": 0.33,
+    "turn_deg": null,
+    "fit": 0.75
+   },
+   "transform": {
+    "yaw": 6.1693,
+    "t": [
+     0.3688,
+     -0.1076,
+     0.0183
+    ]
+   },
+   "support": {
+    "before": {
+     "name": "desk",
+     "height_m": 0.85
+    },
+    "after": {
+     "name": "desk",
+     "height_m": 0.85
+    }
+   },
+   "height_m": 0.12,
+   "floor_blocked_m2": null,
+   "check_from": null,
+   "evidence": {
+    "free": 0.614,
+    "seen": 0.028,
+    "occluded": 0.165,
+    "unreached": 0.193,
+    "points": 575
+   },
+   "cards": {
+    "before": "cards/1_before.jpg",
+    "after": "cards/1_after.jpg"
+   }
+  },
+  {
+   "id": 2,
+   "type": "added",
+   "status": "confirmed",
+   "reason": "the before video looked through 68 % of the points it could check",
+   "label": "stuffed animal",
+   "label_score": 0.827,
+   "sentence": "A yellow stuffed animal appeared on the shelf (84 cm up).",
+   "box_before": null,
+   "box_after": {
+    "center": [
+     0.445,
+     1.317,
+     0.953
+    ],
+    "size": [
+     0.295,
+     0.2,
+     0.227
+    ],
+    "yaw": 1.669
+   },
+   "motion": null,
+   "transform": null,
+   "support": {
+    "after": {
+     "name": "shelf",
+     "height_m": 0.84
+    }
+   },
+   "height_m": 0.22,
+   "floor_blocked_m2": null,
+   "check_from": null,
+   "evidence": {
+    "free": 0.642,
+    "seen": 0.307,
+    "occluded": 0.0,
+    "unreached": 0.05,
+    "points": 218
+   },
+   "cards": {
+    "before": "cards/2_before.jpg",
+    "after": "cards/2_after.jpg"
+   }
+  },
+  {
+   "id": 3,
+   "type": "added",
+   "status": "confirmed",
+   "reason": "the before video looked through 100 % of the points it could check",
+   "label": "water bottle",
+   "label_score": 0.501,
+   "sentence": "A black water bottle appeared on the desk (85 cm up).",
+   "box_before": null,
+   "box_after": {
+    "center": [
+     -0.28,
+     0.2,
+     0.997
+    ],
+    "size": [
+     0.132,
+     0.083,
+     0.293
+    ],
+    "yaw": 2.933
+   },
+   "motion": null,
+   "transform": null,
+   "support": {
+    "after": {
+     "name": "desk",
+     "height_m": 0.85
+    }
+   },
+   "height_m": 0.27,
+   "floor_blocked_m2": null,
+   "check_from": null,
+   "evidence": {
+    "free": 1.0,
+    "seen": 0.0,
+    "occluded": 0.0,
+    "unreached": 0.0,
+    "points": 146
+   },
+   "cards": {
+    "before": "cards/3_before.jpg",
+    "after": "cards/3_after.jpg"
+   }
+  }
+ ],
+ "coverage": {
+  "checked": 0.82,
+  "only_before": 0.1,
+  "only_after": 0.079
+ },
+ "ledger": {
+  "confirmed": 0.958,
+  "unverified": 0.0,
+  "dismissed": 0.0,
+  "residual": 0.042
+ }
+}

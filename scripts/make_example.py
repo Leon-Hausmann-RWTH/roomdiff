@@ -32,10 +32,10 @@ class Args:
     after: tyro.conf.Positional[Path]
     name: str = "living_room"
     docs: bool = True
-    """Also rebuild docs/index.html and the README media from this example."""
+    """Also make this the example behind docs/index.html, the GIF and the floor plan in the README."""
 
 
-def slider_gif(viewer: Path, path: Path, frames: int = 48) -> None:
+def slider_gif(viewer: Path, path: Path, frames: int = 40) -> None:
     """The edit slider played on the before scene while the camera turns slowly, as an animated GIF."""
     shots = []
     with sync_playwright() as p:
@@ -55,7 +55,7 @@ def slider_gif(viewer: Path, path: Path, frames: int = 48) -> None:
             png = page.locator("canvas").screenshot()
             shots.append(Image.open(io.BytesIO(png)).convert("RGB"))
         browser.close()
-    w = 640
+    w = 560
     small = [s.resize((w, round(s.height * w / s.width)), Image.Resampling.LANCZOS) for s in shots]
     palette = small[len(small) // 2].quantize(colors=200)
     frames_p = [s.quantize(palette=palette, dither=Image.Dither.NONE) for s in small]
@@ -82,14 +82,13 @@ def main(args: Args) -> None:
     after = reencode(args.after, root / "after.mp4")
     output = root / "output"
     write_outputs(analyse(before, after, Config()), output, Config())
-    if not args.docs:
-        return
     media = Path("docs/media")
     media.mkdir(parents=True, exist_ok=True)
-    shutil.copy(output / "viewer.html", "docs/index.html")
-    slider_gif(output / "viewer.html", media / "edit_slider.gif")
-    Image.open(output / "floorplan.png").save(media / "floorplan.png")
-    card_strip(output, media / "cards.jpg")
+    card_strip(output, media / f"cards_{args.name}.jpg")
+    if args.docs:
+        shutil.copy(output / "viewer.html", "docs/index.html")
+        slider_gif(output / "viewer.html", media / "edit_slider.gif")
+        Image.open(output / "floorplan.png").save(media / "floorplan.png")
 
 
 if __name__ == "__main__":

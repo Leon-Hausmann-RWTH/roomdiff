@@ -7,7 +7,6 @@ from .config import Config
 from .geometry import Views, backproject, project
 
 SEEN, FREE, OCCLUDED, UNREACHED = 0, 1, 2, 3
-STATE_NAMES = ("seen", "free", "occluded", "unreached")
 
 
 @dataclass
@@ -15,7 +14,6 @@ class Evidence:
     seen: np.ndarray  # (M,) frames whose depth agrees with the point
     free: np.ndarray  # (M,) frames that looked through the point: evidence of absence
     occluded: np.ndarray  # (M,) frames where a nearer surface hid the point
-    in_view: np.ndarray  # (M,) frames where the point falls inside the image on valid depth
     free_views: np.ndarray  # (M,) distinct camera positions among the frames that looked through it
 
 
@@ -43,7 +41,7 @@ def count_evidence(
     are counted over all frames and camera positions instead of averaged per pixel.
     """
     m = len(xyz)
-    seen, free, occ, view = (np.zeros(m, np.int16) for _ in range(4))
+    seen, free, occ = (np.zeros(m, np.int16) for _ in range(3))
     free_bits = np.zeros(m, np.int64)
     n, h, w = views.depth.shape
     bins = viewpoints(views, cfg.viewpoint_spacing)
@@ -69,12 +67,11 @@ def count_evidence(
         tau = cfg.tau_abs + cfg.tau_rel * np.maximum(zk, src_depth[idx])
         decided = ~holes[vi, ui]
         is_free = decided & (nearest[vi, ui] > zk + tau)
-        view[idx] += 1
         free[idx[is_free]] += 1
         free_bits[idx[is_free]] |= np.int64(1) << bins[i]
         occ[idx[decided & (farthest[vi, ui] < zk - tau)]] += 1
         seen[idx[np.abs(d[vi, ui] - zk) <= tau]] += 1
-    return Evidence(seen, free, occ, view, np.bitwise_count(free_bits).astype(np.int16))
+    return Evidence(seen, free, occ, np.bitwise_count(free_bits).astype(np.int16))
 
 
 def point_states(ev: Evidence, cfg: Config) -> np.ndarray:

@@ -1,10 +1,10 @@
-import gc
-
 import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
 from transformers import AutoModel, AutoProcessor
+
+from .config import free_device
 
 # SigLIP 2 large matched so400m on 355 SceneDiff views (85.6 vs 81.4 % top-1 per view) at half the time per
 # crop and 2 GiB less memory; base was 5 to 10 points lower.
@@ -114,11 +114,7 @@ def label(objects: list[list[np.ndarray]], surfaces: list[list[np.ndarray]], dev
         for crops, vocabulary in ((objects, OBJECTS), (surfaces, SURFACES))
     ]
     del model
-    gc.collect()
-    if device.type == "mps":
-        torch.mps.empty_cache()
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    free_device(device)
     return out
 
 

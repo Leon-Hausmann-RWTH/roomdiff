@@ -6,7 +6,7 @@
  "counts": {
   "moved": 1,
   "added": 0,
-  "removed": 2,
+  "removed": 3,
   "unverified": 1
  },
  "changes": [
@@ -14,10 +14,10 @@
    "id": 1,
    "type": "moved",
    "status": "confirmed",
-   "reason": "the after video looked through 73% of its surface",
+   "reason": "the after video looked through 72 % of the points it could check",
    "label": "cushion",
    "label_score": 0.489,
-   "sentence": "The grey cushion moved 1.6 m to the left.",
+   "sentence": "The grey cushion moved 1.6 m along the sofa.",
    "box_before": {
     "center": [
      -0.457,
@@ -75,7 +75,7 @@
     "seen": 0.285,
     "occluded": 0.0,
     "unreached": 0.0,
-    "points": 1241
+    "points": 975
    },
    "cards": {
     "before": "cards/1_before.jpg",
@@ -86,7 +86,7 @@
    "id": 2,
    "type": "removed",
    "status": "confirmed",
-   "reason": "the after video looked through 96% of its surface",
+   "reason": "the after video looked through 94 % of the points it could check",
    "label": "stool",
    "label_score": 0.805,
    "sentence": "The white stool on the floor was removed.",
@@ -120,7 +120,7 @@
     "seen": 0.064,
     "occluded": 0.0,
     "unreached": 0.012,
-    "points": 525
+    "points": 487
    },
    "cards": {
     "before": "cards/2_before.jpg",
@@ -131,10 +131,10 @@
    "id": 3,
    "type": "removed",
    "status": "confirmed",
-   "reason": "the after video looked through 70% of its surface",
+   "reason": "the after video looked through 79 % of the points it could check",
    "label": "blanket",
    "label_score": 0.296,
-   "sentence": "The grey blanket on the sofa (83 cm up) was removed.",
+   "sentence": "The object on the sofa (83 cm up), possibly a blanket, was removed.",
    "box_before": {
     "center": [
      0.221,
@@ -165,7 +165,7 @@
     "seen": 0.166,
     "occluded": 0.0,
     "unreached": 0.225,
-    "points": 282
+    "points": 271
    },
    "cards": {
     "before": "cards/3_before.jpg",
@@ -176,10 +176,10 @@
    "id": 4,
    "type": "removed",
    "status": "unverified",
-   "reason": "the after video looked through 39% of it; the rest is still there",
+   "reason": "the after video looked through 38 % of it; the rest is still there",
    "label": "shoe",
    "label_score": 0.469,
-   "sentence": "Possibly: the shoe on the floor was removed.",
+   "sentence": "The beige shoe on the shelf (50 cm up) may have been removed.",
    "box_before": {
     "center": [
      -0.321,
@@ -198,26 +198,13 @@
    "transform": null,
    "support": {
     "before": {
-     "name": "floor",
+     "name": "shelf",
      "height_m": 0.5
     }
    },
    "height_m": 0.05,
    "floor_blocked_m2": null,
-   "check_from": {
-    "video": "before",
-    "time_s": 0.4,
-    "position": [
-     2.0380001068115234,
-     0.23399999737739563,
-     1.5269999504089355
-    ],
-    "look_at": [
-     -0.3199999928474426,
-     -0.7170000076293945,
-     0.5249999761581421
-    ]
-   },
+   "check_from": null,
    "evidence": {
     "free": 0.385,
     "seen": 0.615,
@@ -229,62 +216,6 @@
     "before": "cards/4_before.jpg",
     "after": "cards/4_after.jpg"
    }
-  }
- ],
- "unchecked": [
-  {
-   "id": "U1",
-   "video": "before",
-   "box": {
-    "center": [
-     -0.431,
-     1.921,
-     0.546
-    ],
-    "size": [
-     0.97,
-     0.956,
-     0.966
-    ],
-    "yaw": 1.868
-   },
-   "sentence": "The after video never looked at a region 1.0 m by 1.0 m, up to 1.0 m high."
-  },
-  {
-   "id": "U2",
-   "video": "after",
-   "box": {
-    "center": [
-     1.104,
-     -0.765,
-     0.467
-    ],
-    "size": [
-     1.404,
-     1.367,
-     0.813
-    ],
-    "yaw": 1.392
-   },
-   "sentence": "The before video never looked at a region 1.4 m by 1.4 m, up to 0.9 m high."
-  },
-  {
-   "id": "U3",
-   "video": "after",
-   "box": {
-    "center": [
-     -0.921,
-     1.363,
-     0.951
-    ],
-    "size": [
-     1.15,
-     0.413,
-     0.354
-    ],
-    "yaw": 1.18
-   },
-   "sentence": "The before video never looked at a region 1.1 m by 0.4 m, up to 1.1 m high."
   }
  ],
  "coverage": {

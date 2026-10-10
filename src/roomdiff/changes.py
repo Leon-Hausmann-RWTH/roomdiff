@@ -15,12 +15,6 @@ class Box:
     size: np.ndarray  # (3,) extent along the box's own x, y and world z, metres
     yaw: float  # radians, rotation of the box x axis about world z
 
-    def corners(self) -> np.ndarray:
-        c, s = np.cos(self.yaw), np.sin(self.yaw)
-        R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-        signs = np.array([[x, y, z] for z in (-1, 1) for y in (-1, 1) for x in (-1, 1)])
-        return self.center + (signs * self.size / 2) @ R.T  # (8, 3)
-
 
 @dataclass
 class Change:

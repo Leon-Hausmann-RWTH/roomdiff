@@ -172,7 +172,7 @@ def test_components_split_separate_blobs():
 )
 def test_point_states(seen, free, occluded, expected):
     a = lambda x: np.array([x], np.int16)  # noqa: E731
-    ev = Evidence(a(seen), a(free), a(occluded), a(seen + free + occluded), a(1))
+    ev = Evidence(a(seen), a(free), a(occluded), a(1))
     assert point_states(ev, Config())[0] == expected
 
 
@@ -182,10 +182,8 @@ def test_candidates_need_more_than_one_camera_position():
     many = np.c_[g[:, 0] + 2, np.full(len(g), 1.0), g[:, 1] + 0.3]  # front face of a removed board
     xyz = np.concatenate([one, many]).astype(np.float32)
     n = len(xyz)
-    cloud = Cloud(
-        xyz, np.zeros((n, 3), np.uint8), np.full(n, 2.0, np.float32), np.zeros(n, int), np.ones(n, int)
-    )
+    cloud = Cloud(xyz, np.zeros((n, 3), np.uint8), np.full(n, 2.0, np.float32))
     views = np.r_[np.ones(len(g)), np.full(len(g), 3)].astype(np.int16)
     z = np.zeros(n, np.int16)
-    found = candidates(cloud, np.full(n, FREE, np.int8), Evidence(z, z + 4, z, z + 4, views), Config())
+    found = candidates(cloud, np.full(n, FREE, np.int8), Evidence(z, z + 4, z, views), Config())
     assert len(found) == 1 and found[0].min() >= len(g)

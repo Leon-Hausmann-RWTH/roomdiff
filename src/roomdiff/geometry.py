@@ -19,8 +19,6 @@ class Cloud:
     xyz: np.ndarray  # (M, 3) float32 world metres
     rgb: np.ndarray  # (M, 3) uint8
     depth: np.ndarray  # (M,) float32 mean depth at which the own video saw the point, metres
-    best_frame: np.ndarray  # (M,) keyframe that saw the point from closest
-    n_obs: np.ndarray  # (M,) pixels merged into the point
 
 
 def subset(cloud: Cloud, keep: np.ndarray) -> Cloud:
@@ -65,14 +63,13 @@ def pack_keys(cells: np.ndarray) -> np.ndarray:
 
 
 def cloud_from_views(views: Views, voxel: float) -> Cloud:
-    xyz, rgb, dep, frame = [], [], [], []
+    xyz, rgb, dep = [], [], []
     for i in range(len(views.depth)):
         ok = views.depth[i] > 0
         xyz.append(backproject(views.depth[i], views.K[i], views.c2w[i])[ok])
         rgb.append(views.images[i][ok])
         dep.append(views.depth[i][ok])
-        frame.append(np.full(ok.sum(), i, np.int32))
-    xyz, rgb, dep, frame = (np.concatenate(a) for a in (xyz, rgb, dep, frame))
+    xyz, rgb, dep = (np.concatenate(a) for a in (xyz, rgb, dep))
     keys = pack_keys(np.floor(xyz / voxel))
     uniq, inv, counts = np.unique(keys, return_inverse=True, return_counts=True)
     m = len(uniq)
@@ -80,14 +77,10 @@ def cloud_from_views(views: Views, voxel: float) -> Cloud:
     def mean(a):
         return np.stack([np.bincount(inv, a[:, k], m) for k in range(a.shape[1])], 1) / counts[:, None]
 
-    order = np.lexsort((dep, inv))
-    first = order[np.unique(inv[order], return_index=True)[1]]
     return Cloud(
         xyz=mean(xyz).astype(np.float32),
         rgb=mean(rgb.astype(np.float64)).round().astype(np.uint8),
         depth=(np.bincount(inv, dep, m) / counts).astype(np.float32),
-        best_frame=frame[first],
-        n_obs=counts.astype(np.int32),
     )
 
 

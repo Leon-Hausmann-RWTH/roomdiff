@@ -1,6 +1,5 @@
 import contextlib
 import functools
-import gc
 import hashlib
 import io
 import time
@@ -13,7 +12,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from safetensors import safe_open
 
-from .config import Config, pick_device
+from .config import Config, free_device, pick_device
 from .geometry import Views, depth_edges
 from .video import Keyframes, probe, recon_size, resize, select
 
@@ -78,11 +77,7 @@ def run_pi3x(images: np.ndarray, device: torch.device) -> dict[str, np.ndarray]:
         res = model(x[None])
     out = {k: res[k][0].float().cpu().numpy() for k in ("local_points", "camera_poses", "conf")}
     del model, res, x
-    gc.collect()
-    if device.type == "mps":
-        torch.mps.empty_cache()
-    elif device.type == "cuda":
-        torch.cuda.empty_cache()
+    free_device(device)
     return out
 
 
@@ -141,7 +136,10 @@ def reconstruct(path_a: Path, path_b: Path, cfg: Config, required=((), ())) -> R
     depth = out["local_points"][..., 2].astype(np.float32)
     c2w = out["camera_poses"].astype(np.float32)
     fit_px = (fits[0][1], fits[1][1])
-    print(f"reconstruction: {len(conf)} frames on {device.type} ({time.time() - t:.0f} s)")
+    fit = f"{fit_px[0]:.1f} / {fit_px[1]:.1f} px"
+    print(f"reconstruction: {len(conf)} frames on {device.type}, pinhole fit {fit} ({time.time() - t:.0f} s)")
+    if max(fit_px) > 2:
+        print("warning: the predicted rays fit a pinhole camera poorly (a wide-angle lens?)")
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(cache, depth=depth, conf=conf8, c2w=c2w, K=K, fit_px=np.array(fit_px))
     return Recon(keys, depth, conf8.astype(np.float32) / 255, c2w, K, fit_px)
