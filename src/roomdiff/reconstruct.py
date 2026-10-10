@@ -51,11 +51,12 @@ def chunked_encoder(forward, x, is_training=True):
 
 
 def load_pi3x(device: torch.device):
-    from pi3.models.pi3x import Pi3X
+    # Pi3 prints a notice about its optional CUDA RoPE kernel on import; the PyTorch fallback is fine.
+    with contextlib.redirect_stdout(io.StringIO()):
+        from pi3.models.pi3x import Pi3X
 
     path = hf_hub_download(PI3X_REPO, "model.safetensors", revision=PI3X_REVISION)
-    # Pi3 prints a notice about its optional CUDA RoPE kernel; the PyTorch fallback is what runs here.
-    with torch.device(device), contextlib.redirect_stdout(io.StringIO()):
+    with torch.device(device):
         model = Pi3X(use_multimodal=False)
     names = set(model.state_dict())
     with safe_open(path, "pt", device=str(device)) as f:

@@ -42,7 +42,10 @@ def slider_gif(viewer: Path, path: Path, frames: int = 48) -> None:
         page.goto(viewer.resolve().as_uri())
         page.wait_for_timeout(2500)
         page.get_by_role("button", name="Before", exact=True).click()
-        page.evaluate("controls.autoRotate = true; controls.autoRotateSpeed = 0.6")
+        page.locator("#showUnchecked").uncheck()
+        # Closer than the default overview, turning slowly enough that the edits stay in view.
+        page.evaluate("camera.position.lerp(controls.target, 0.4)")
+        page.evaluate("controls.autoRotate = true; controls.autoRotateSpeed = 0.25")
         for k in range(frames):
             t = min(1.0, max(0.0, (k - 6) / (frames - 18)))  # hold the before scene, sweep, hold the result
             page.evaluate(SET_SLIDER, t)

@@ -1,0 +1,301 @@
+{
+ "before": "before.mp4",
+ "after": "after.mp4",
+ "units": "metres, z up, floor at z = 0",
+ "camera_height_m": 1.49,
+ "counts": {
+  "moved": 1,
+  "added": 0,
+  "removed": 2,
+  "unverified": 1
+ },
+ "changes": [
+  {
+   "id": 1,
+   "type": "moved",
+   "status": "confirmed",
+   "reason": "the after video looked through 73% of its surface",
+   "label": "cushion",
+   "label_score": 0.489,
+   "sentence": "The grey cushion moved 1.6 m to the left.",
+   "box_before": {
+    "center": [
+     -0.457,
+     0.534,
+     0.677
+    ],
+    "size": [
+     0.495,
+     0.256,
+     0.374
+    ],
+    "yaw": 1.602
+   },
+   "box_after": {
+    "center": [
+     0.596,
+     -0.67,
+     0.64
+    ],
+    "size": [
+     0.448,
+     0.353,
+     0.32
+    ],
+    "yaw": -3.118
+   },
+   "motion": {
+    "distance_m": 1.56,
+    "turn_deg": null,
+    "fit": 0.82
+   },
+   "transform": {
+    "yaw": 1.4198,
+    "t": [
+     1.2016,
+     -0.2812,
+     -0.0569
+    ]
+   },
+   "support": {
+    "before": {
+     "name": "sofa",
+     "height_m": 0.49
+    },
+    "after": {
+     "name": "sofa",
+     "height_m": 0.48
+    }
+   },
+   "height_m": 0.37,
+   "floor_blocked_m2": null,
+   "check_from": null,
+   "evidence": {
+    "free": 0.715,
+    "seen": 0.285,
+    "occluded": 0.0,
+    "unreached": 0.0,
+    "points": 1241
+   },
+   "cards": {
+    "before": "cards/1_before.jpg",
+    "after": "cards/1_after.jpg"
+   }
+  },
+  {
+   "id": 2,
+   "type": "removed",
+   "status": "confirmed",
+   "reason": "the after video looked through 96% of its surface",
+   "label": "stool",
+   "label_score": 0.805,
+   "sentence": "The white stool on the floor was removed.",
+   "box_before": {
+    "center": [
+     0.994,
+     -0.056,
+     0.137
+    ],
+    "size": [
+     0.415,
+     0.32,
+     0.273
+    ],
+    "yaw": 2.704
+   },
+   "box_after": null,
+   "motion": null,
+   "transform": null,
+   "support": {
+    "before": {
+     "name": "floor",
+     "height_m": 0.0
+    }
+   },
+   "height_m": 0.21,
+   "floor_blocked_m2": null,
+   "check_from": null,
+   "evidence": {
+    "free": 0.924,
+    "seen": 0.064,
+    "occluded": 0.0,
+    "unreached": 0.012,
+    "points": 525
+   },
+   "cards": {
+    "before": "cards/2_before.jpg",
+    "after": "cards/2_after.jpg"
+   }
+  },
+  {
+   "id": 3,
+   "type": "removed",
+   "status": "confirmed",
+   "reason": "the after video looked through 70% of its surface",
+   "label": "blanket",
+   "label_score": 0.296,
+   "sentence": "The grey blanket on the sofa (83 cm up) was removed.",
+   "box_before": {
+    "center": [
+     0.221,
+     -1.042,
+     0.871
+    ],
+    "size": [
+     0.338,
+     0.223,
+     0.082
+    ],
+    "yaw": -3.05
+   },
+   "box_after": null,
+   "motion": null,
+   "transform": null,
+   "support": {
+    "before": {
+     "name": "sofa",
+     "height_m": 0.83
+    }
+   },
+   "height_m": 0.08,
+   "floor_blocked_m2": null,
+   "check_from": null,
+   "evidence": {
+    "free": 0.609,
+    "seen": 0.166,
+    "occluded": 0.0,
+    "unreached": 0.225,
+    "points": 282
+   },
+   "cards": {
+    "before": "cards/3_before.jpg",
+    "after": "cards/3_after.jpg"
+   }
+  },
+  {
+   "id": 4,
+   "type": "removed",
+   "status": "unverified",
+   "reason": "the after video looked through 39% of it; the rest is still there",
+   "label": "shoe",
+   "label_score": 0.469,
+   "sentence": "Possibly: the shoe on the floor was removed.",
+   "box_before": {
+    "center": [
+     -0.321,
+     -0.737,
+     0.519
+    ],
+    "size": [
+     0.231,
+     0.167,
+     0.048
+    ],
+    "yaw": 0.856
+   },
+   "box_after": null,
+   "motion": null,
+   "transform": null,
+   "support": {
+    "before": {
+     "name": "floor",
+     "height_m": 0.5
+    }
+   },
+   "height_m": 0.05,
+   "floor_blocked_m2": null,
+   "check_from": {
+    "video": "before",
+    "time_s": 0.4,
+    "position": [
+     2.0380001068115234,
+     0.23399999737739563,
+     1.5269999504089355
+    ],
+    "look_at": [
+     -0.3199999928474426,
+     -0.7170000076293945,
+     0.5249999761581421
+    ]
+   },
+   "evidence": {
+    "free": 0.385,
+    "seen": 0.615,
+    "occluded": 0.0,
+    "unreached": 0.0,
+    "points": 122
+   },
+   "cards": {
+    "before": "cards/4_before.jpg",
+    "after": "cards/4_after.jpg"
+   }
+  }
+ ],
+ "unchecked": [
+  {
+   "id": "U1",
+   "video": "before",
+   "box": {
+    "center": [
+     -0.431,
+     1.921,
+     0.546
+    ],
+    "size": [
+     0.97,
+     0.956,
+     0.966
+    ],
+    "yaw": 1.868
+   },
+   "sentence": "The after video never looked at a region 1.0 m by 1.0 m, up to 1.0 m high."
+  },
+  {
+   "id": "U2",
+   "video": "after",
+   "box": {
+    "center": [
+     1.104,
+     -0.765,
+     0.467
+    ],
+    "size": [
+     1.404,
+     1.367,
+     0.813
+    ],
+    "yaw": 1.392
+   },
+   "sentence": "The before video never looked at a region 1.4 m by 1.4 m, up to 0.9 m high."
+  },
+  {
+   "id": "U3",
+   "video": "after",
+   "box": {
+    "center": [
+     -0.921,
+     1.363,
+     0.951
+    ],
+    "size": [
+     1.15,
+     0.413,
+     0.354
+    ],
+    "yaw": 1.18
+   },
+   "sentence": "The before video never looked at a region 1.1 m by 0.4 m, up to 1.1 m high."
+  }
+ ],
+ "coverage": {
+  "checked": 0.776,
+  "only_before": 0.053,
+  "only_after": 0.171
+ },
+ "ledger": {
+  "confirmed": 0.875,
+  "unverified": 0.018,
+  "dismissed": 0.081,
+  "residual": 0.026
+ }
+}
