@@ -50,7 +50,8 @@
    "motion": {
     "distance_m": 0.33,
     "turn_deg": null,
-    "fit": 0.75
+    "fit": 0.75,
+    "in_place": false
    },
    "transform": {
     "yaw": -0.1139,

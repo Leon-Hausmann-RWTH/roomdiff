@@ -175,7 +175,8 @@ def write_floorplan(
     shade = np.where(top < 0, 255, 236 - 116 * top / HEIGHT_TOP).reshape(shape).astype(np.uint8)
     grey = Image.fromarray(shade, "L").filter(ImageFilter.MinFilter(3))
     img.paste(grey.resize((pw, ph), Image.NEAREST), (m, m))
-    # Tinted cells were seen by one video only; the other never reached them, so nothing there was checked.
+    # A cell is tinted when the other video saw every point in it in too few frames; the tint is the video
+    # with more points there. Hidden points sit in columns with checked ones, so only the viewer shows them.
     flat, shape = cells(0.05)
     n, split = shape[0] * shape[1], len(before.xyz)
     reached = np.bincount(flat, state != 3, n) > 0
@@ -195,7 +196,7 @@ def write_floorplan(
             d.polygon([tuple(q) for q in fp], fill=(*col, 40 if ghost or k == "unverified" else 110))
             ring(d, fp, col, 2 if ghost else 4, dash=10 if k == "unverified" else 0)
             taken.append((*fp.min(0), *fp.max(0)))
-        if c["type"] == "moved":
+        if c["type"] == "moved" and not c["motion"]["in_place"]:
             a, b = px(c["box_before"]["center"][:2]), px(c["box_after"]["center"][:2])
             n_ab = max(np.linalg.norm(b - a), 1e-6)
             v = (b - a) / n_ab
@@ -207,20 +208,23 @@ def write_floorplan(
             d.polygon([tuple(b), tuple(b - v * h + n), tuple(b - v * h - n)], fill=col)
         if c["check_from"]:
             camera_glyph(d, px(c["check_from"]["position"][:2]), px(c["check_from"]["look_at"][:2]))
-    # Tags go on top, at the first corner of their footprint that is clear of footprints and other tags.
     for c in changes:
-        fp = px(corners(c["box_after"] or c["box_before"])[:, :2])
-        (x0, y0), (x1, y1) = fp.min(0), fp.max(0)
-        w = 53 + d.textlength(str(c["id"]), font=font(26))
-        spots = [(x1 + 6, y0 - 46), (x0 - w - 6, y0 - 46), (x1 + 6, y1 + 6), (x0 - w - 6, y1 + 6)]
-        for x, y in spots:
-            if not any(x < r[2] and r[0] < x + w and y < r[3] and r[1] < y + 40 for r in taken):
-                break
-        else:
-            x, y = spots[0]
-        taken.append(tag(d, x, y, kind(c), str(c["id"]), 40))
+        place_tag(d, px(corners(c["box_after"] or c["box_before"])[:, :2]), taken, c, 40)
     bottom = legend(d, pw + 2 * m, m, result, s)
     img.crop((0, 0, img.width, max(ph + 2 * m, bottom + m))).save(path)
+
+
+def place_tag(d: ImageDraw.ImageDraw, fp: np.ndarray, taken: list, c: dict, h: int) -> None:
+    """Tag on top, at the first corner of the footprint fp (pixels) clear of footprints and other tags."""
+    (x0, y0), (x1, y1) = fp.min(0), fp.max(0)
+    w = h * 1.33 + d.textlength(str(c["id"]), font=font(round(h * 0.66)))
+    spots = [(x1 + 6, y0 - h - 6), (x0 - w - 6, y0 - h - 6), (x1 + 6, y1 + 6), (x0 - w - 6, y1 + 6)]
+    for x, y in spots:
+        if not any(x < r[2] and r[0] < x + w and y < r[3] and r[1] < y + h for r in taken):
+            break
+    else:
+        x, y = spots[0]
+    taken.append(tag(d, x, y, kind(c), str(c["id"]), h))
 
 
 def camera_glyph(d: ImageDraw.ImageDraw, p: np.ndarray, target: np.ndarray) -> None:
@@ -244,7 +248,11 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> in
 
     for c in result["changes"]:
         r = tag(d, x, y, kind(c), str(c["id"]), 34)
-        move = f" {c['motion']['distance_m']:.1f} m" if c["motion"] else ""
+        mo, move = c["motion"], ""
+        if mo:
+            move = (
+                f", turned {abs(mo['turn_deg'])} degrees" if mo["in_place"] else f" {mo['distance_m']:.1f} m"
+            )
         text = f"{c['title']}, {c['type']}{move}"
         size = 26 if d.textlength(text, font=f) < x + 500 - r[2] else 20
         d.text((r[2] + 14, y + 17), text, font=font(size), fill="black", anchor="lm")
@@ -257,7 +265,7 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> in
     if any(c["check_from"] for c in result["changes"]):
         camera_glyph(d, np.array([x + 2.0, y + 17]), np.array([x + 54.0, y + 17]))
         row("where to film next (unverified)")
-    row("Not checked by the other video", 0, 70)
+    row("Too few views from the other video", 0, 70)
     for side in SIDES:
         d.rectangle((x, y, x + 48, y + 34), fill=(*VIDEO_RGB[side], 60))
         row(f"surface from the {side} video")
@@ -316,7 +324,10 @@ def write_report(path: Path, result: dict) -> None:
         if round(100 * cov["unchecked_" + v])
     ]
     rest = " The other video saw the rest in fewer than three frames"
-    one = f"{rest}: {join_and(only)}; the top view tints them." if only else ""
+    tints = (
+        "The viewer tints them and the hidden points; the top view tints places where nothing was checked."
+    )
+    one = f"{rest}: {join_and(only)}. {tints}" if only else ""
     checked = f"The other video checked {pct(cov['checked'])} of all surface points"
     checked += f"; {pct(cov['hidden'])} were hidden from it."
     names = ("confirmed changes", "unverified changes", "dismissed candidates", "no candidate")
@@ -334,14 +345,15 @@ def write_report(path: Path, result: dict) -> None:
         if result["floor_found"]
         else "No plausible floor was found, so heights count from the lowest large level surface."
     )
+    warn = "".join(f"Warning: {w}.\n\n" for w in result["warnings"])
     path.write_text(f"""# What changed in the room
 
 Between {result["before"]} and {result["after"]} roomdiff found {found}.
 {unverified}{height} Boxes and positions are in changes.json; its "frame" field gives the axes.
 
-![Top view of the changes](floorplan.png)
+{warn}![Top view of the changes](floorplan.png)
 
-| id | | type | label | status | sentence |
+| id | | type | name | status | sentence |
 |---|---|---|---|---|---|
 {table}
 

@@ -49,6 +49,7 @@ def change_json(c: Change, before: Cloud, after: Cloud) -> dict:
             "distance_m": round(m.distance, 2),
             "turn_deg": None if m.turn is None else round(m.turn),
             "fit": round(m.fit, 2),
+            "in_place": c.facts.get("in_place", False),
         },
         "transform": None if m is None else {"yaw": round(m.yaw, 4), "t": np.round(m.t, 4).tolist()},
         "support": support,

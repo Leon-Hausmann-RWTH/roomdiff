@@ -5,7 +5,7 @@ The camera was held 1.53 m above the floor. Boxes and positions are in changes.j
 
 ![Top view of the changes](floorplan.png)
 
-| id | | type | label | status | sentence |
+| id | | type | name | status | sentence |
 |---|---|---|---|---|---|
 | 1 | → | moved | plastic bag | confirmed | The plastic bag moved 0.3 m along the desk. |
 | 2 | + | added | stuffed animal | confirmed | A yellow stuffed animal appeared on the shelf (84 cm up). |
@@ -41,7 +41,7 @@ A black water bottle appeared on the desk (85 cm up).
 
 ## Coverage
 
-The other video checked 72 % of all surface points; 10 % were hidden from it. The other video saw the rest in fewer than three frames: 10 % from the before video and 8 % from the after video; the top view tints them.
+The other video checked 72 % of all surface points; 10 % were hidden from it. The other video saw the rest in fewer than three frames: 10 % from the before video and 8 % from the after video. The viewer tints them and the hidden points; the top view tints places where nothing was checked.
 
 The points the other video looked through belong to: 96 % confirmed changes and 4 % no candidate.
 

@@ -55,10 +55,10 @@ def descriptor(o: Obj, feats: np.ndarray) -> np.ndarray | None:
 def find_other_ends(
     lonely: list[Obj], clouds: tuple[Cloud, Cloud], states, views, images, taken, cfg: Config, device
 ) -> list[tuple[Obj, Obj, Motion]]:
-    """For a confirmed removal (or addition) with no partner, look for the same object in the other
-    video, at a place the first video saw empty. A move whose new place yields too little free space
-    for a candidate otherwise reads as a removal. Where the first video never looked, appearance alone
-    cannot tell the moved object from an unchanged twin, so such places are not used.
+    """For a confirmed removal (or addition) with no partner, find the best appearance match in the other
+    video and keep it only if the first video saw that place empty. A move whose new place yields too
+    little free space for a candidate otherwise reads as a removal. Where the first video never looked,
+    appearance alone cannot tell the moved object from an unchanged twin, so such a match is dropped.
     """
     if not lonely:
         return []

@@ -32,7 +32,10 @@ FRAME = (
     "One frame for both videos, new for each run: metres, right-handed, z up, x along one of the main wall "
     "directions, origin below the middle of the scene,"
 )
-NO_FLOOR = " z = 0 at the lowest large level surface (no plausible floor found)."
+NO_FLOOR = (
+    " z = 0 at the lowest large level surface, or at the lowest 1 % of points if there is none (no plausible"
+    " floor found)."
+)
 
 
 @dataclass
@@ -64,13 +67,12 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
     va, vb = to_views(recon, cfg)
     frame = world_frame(va, vb)
     va, vb = transform(va, frame.T), transform(vb, frame.T)
-    print(f"world frame: camera {frame.camera_height:.2f} m above the floor ({time.time() - t:.1f} s)")
+    ground = "the floor" if frame.floor_found else "z = 0"
+    print(f"world frame: camera {frame.camera_height:.2f} m above {ground} ({time.time() - t:.1f} s)")
     if not frame.up_from_cameras:
         warn("both videos look in almost one direction; gravity comes from surface normals")
     if not frame.floor_found:
-        warn(
-            "no plausible floor plane: z = 0 is the lowest large level surface, and no object is on the floor"
-        )
+        warn("no plausible floor plane: heights count from z = 0 (see frame); nothing is put on the floor")
 
     t = time.time()
     for own, name in ((va, "before"), (vb, "after")):

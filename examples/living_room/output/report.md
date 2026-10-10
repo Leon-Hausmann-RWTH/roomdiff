@@ -6,7 +6,7 @@ The camera was held 1.49 m above the floor. Boxes and positions are in changes.j
 
 ![Top view of the changes](floorplan.png)
 
-| id | | type | label | status | sentence |
+| id | | type | name | status | sentence |
 |---|---|---|---|---|---|
 | 1 | → | moved | cushion | confirmed | The grey cushion moved 1.6 m along the sofa. |
 | 2 | − | removed | stool | confirmed | The white stool on the floor was removed. |
@@ -52,7 +52,7 @@ The beige shoe on the shelf (50 cm up) may have been removed.
 
 ## Coverage
 
-The other video checked 70 % of all surface points; 7 % were hidden from it. The other video saw the rest in fewer than three frames: 5 % from the before video and 17 % from the after video; the top view tints them.
+The other video checked 70 % of all surface points; 7 % were hidden from it. The other video saw the rest in fewer than three frames: 5 % from the before video and 17 % from the after video. The viewer tints them and the hidden points; the top view tints places where nothing was checked.
 
 The points the other video looked through belong to: 88 % confirmed changes, 2 % unverified changes, 8 % dismissed candidates and 3 % no candidate.
 

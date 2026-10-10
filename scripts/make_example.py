@@ -1,8 +1,10 @@
 """Rebuild a committed example and the README media from two videos.
 
 Writes examples/<name>/{before.mp4, after.mp4} (small upright copies), examples/<name>/output/ (the
-normal run on those copies), the viewer for GitHub Pages (docs/index.html for the main example, else
-docs/<name>.html) and docs/media/. Needs Playwright's browser once: uv run playwright install chromium.
+normal run on those copies), the viewer for GitHub Pages at docs/<name>.html and docs/media/. With
+--docs (the default) it becomes the main example: docs/index.html opens its viewer, and the GIF, top
+view and evidence figure in the README show it. Needs Playwright's browser once:
+uv run playwright install chromium.
 
     uv run python scripts/make_example.py before.mov after.mov --name my_room
 """
@@ -19,10 +21,11 @@ from evaluate import naive
 from PIL import Image, ImageColor, ImageDraw
 from playwright.sync_api import sync_playwright
 
+from roomdiff.cli import check_video
 from roomdiff.config import Config
 from roomdiff.evidence import FREE, OCCLUDED, SEEN, UNREACHED
 from roomdiff.pipeline import Result, analyse, write_outputs
-from roomdiff.report import COLORS, corners, font, kind, ring, tag
+from roomdiff.report import COLORS, corners, font, kind, place_tag, ring
 
 GL = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 SET_SLIDER = (
@@ -85,6 +88,15 @@ def card_strip(output: Path, result: dict, path: Path, n: int = 3) -> None:
     Image.fromarray(np.concatenate(rows)).save(path, quality=85)
 
 
+# GitHub Pages serves docs/index.html at the site root; it forwards to the main example's viewer.
+INDEX = """<!doctype html>
+<meta charset="utf-8">
+<title>roomdiff</title>
+<meta http-equiv="refresh" content="0; url={name}.html">
+<p><a href="{name}.html">Open the {name} viewer</a></p>
+"""
+
+
 # What the ray test says about a region that nearest-neighbour differencing would report as a change.
 VERDICTS = [
     (FREE, (29, 29, 31), "looked through by the other video"),
@@ -122,14 +134,15 @@ def evidence_figure(res: Result, result: dict, cfg: Config, path: Path) -> None:
         counts[code] += 1
         dots(res.clouds[o.side].xyz[o.idx, :2], colors[code], 2)
     img = Image.fromarray(canvas)
-    d = ImageDraw.Draw(img, "RGBA")
+    d, taken = ImageDraw.Draw(img, "RGBA"), []
     for c in result["changes"]:
         col = ImageColor.getrgb(COLORS[kind(c)])
         for box in (b for b in (c["box_before"], c["box_after"]) if b):
             fp = px(corners(box)[[0, 1, 3, 2], :2])
             ring(d, fp, col, 4)
-        fp = px(corners(c["box_after"] or c["box_before"])[:, :2])
-        tag(d, fp[:, 0].max() + 6, fp[:, 1].min() - 40, kind(c), str(c["id"]), 34)
+            taken.append((*fp.min(0), *fp.max(0)))
+    for c in result["changes"]:
+        place_tag(d, px(corners(c["box_after"] or c["box_before"])[:, :2]), taken, c, 34)
     x, y, f = pw + 2 * m + 20, m, font(26)
     d.text((x, y), "Where the two videos disagree", font=font(32), fill="black")
     d.text((x, y + 44), f"{len(regions)} regions have no point of the other video", font=f, fill=(90, 90, 90))
@@ -148,23 +161,24 @@ def evidence_figure(res: Result, result: dict, cfg: Config, path: Path) -> None:
 
 
 def main(args: Args) -> None:
+    # The same input checks as the CLI, on the original files: the copies lose the HDR tag.
+    notes = [n for p in (args.before, args.after) for n in check_video(p, args.config)]
     root = Path("examples") / args.name
     before = reencode(args.before, root / "before.mp4")
     after = reencode(args.after, root / "after.mp4")
     output = root / "output"
     res = analyse(before, after, args.config)
+    res.warnings[:0] = notes
     result = write_outputs(res, output, args.config)
     media = Path("docs/media")
-    media.mkdir(parents=True, exist_ok=True)
-    card_strip(output, result, media / f"cards_{args.name}.jpg")
     if args.docs:
         # The GIF first: it needs the browser, and a missing one should fail before docs/ changes.
         slider_gif(output / "viewer.html", media / "edit_slider.gif")
-        shutil.copy(output / "viewer.html", "docs/index.html")
         Image.open(output / "floorplan.png").save(media / "floorplan.png")
         evidence_figure(res, result, args.config, media / "evidence_example.png")
-    else:
-        shutil.copy(output / "viewer.html", f"docs/{args.name}.html")
+        Path("docs/index.html").write_text(INDEX.format(name=args.name))
+    card_strip(output, result, media / f"cards_{args.name}.jpg")
+    shutil.copy(output / "viewer.html", f"docs/{args.name}.html")
 
 
 if __name__ == "__main__":

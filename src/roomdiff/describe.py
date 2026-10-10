@@ -40,9 +40,11 @@ def support(o: Obj, cloud: Cloud, state: np.ndarray, taken: np.ndarray, floor_fo
         & (z < bottom + 0.02)
     )
     under &= (state == SEEN) & ~taken
+    # Without a floor plane, depth noise around z = 0 can put the support a few centimetres below it.
     if under.sum() < 10:
-        return {"name": None, "height_m": round(bottom, 2), "points": None}
-    return {"name": None, "height_m": round(float(np.median(z[under])), 2), "points": np.nonzero(under)[0]}
+        return {"name": None, "height_m": max(0.0, round(bottom, 2)), "points": None}
+    height = max(0.0, round(float(np.median(z[under])), 2))
+    return {"name": None, "height_m": height, "points": np.nonzero(under)[0]}
 
 
 def surface_crop(o: Obj, pts: np.ndarray, cloud: Cloud, views: Views, images) -> np.ndarray | None:
@@ -66,7 +68,10 @@ def on_phrase(s: dict) -> str:
     if s["name"] == "floor":
         return "on the floor"
     cm = round(s["height_m"] * 100)
-    return f"on the {s['name']} ({cm} cm up)" if s["name"] else f"on a surface {cm} cm up"
+    # A few centimetres above z = 0 is depth noise, not a height worth stating.
+    if s["name"]:
+        return f"on the {s['name']} ({cm} cm up)" if cm >= 5 else f"on the {s['name']}"
+    return f"on a surface {cm} cm up" if cm >= 5 else "on a surface"
 
 
 def name_changes(
@@ -111,12 +116,19 @@ def name_changes(
         # only for a removal: filming again today cannot show what stood somewhere before.
         if c.status == "unverified" and c.lead.status == "unverified" and c.lead.side == 0:
             c.facts["check_from"] = check_from(c.lead, clouds, views, times)
+        if c.kind == "moved":
+            # assemble() keeps a pair that stayed in place only if it turned by at least min_turn.
+            c.facts["in_place"] = c.motion.distance < cfg.min_move
         c.sentence = sentence(c, name, hedge, cfg.min_turn)
 
 
 def sentence(c: Change, name: str, hedge: str, min_turn: float = 15.0) -> str:
     sup, may = c.facts["support"], c.status == "unverified"
-    if c.kind == "moved":
+    if c.kind == "moved" and c.facts["in_place"]:
+        verb = "may have turned" if may else "turned"
+        turn = f"about {abs(round(c.motion.turn / 5) * 5)} degrees in place"
+        text = f"The {name} {on_phrase(sup['before'])}{hedge} {verb} {turn}"
+    elif c.kind == "moved":
         m, before, after = c.motion, sup["before"], sup["after"]
         text = f"The {name}{hedge} {'may have moved' if may else 'moved'} {m.distance:.1f} m"
         # Two names for surfaces at one height are usually one piece of furniture named twice.
@@ -125,7 +137,7 @@ def sentence(c: Change, name: str, hedge: str, min_turn: float = 15.0) -> str:
             after["name"],
         ):
             before = after = before if before["name"] else after
-        if before["name"] != after["name"]:
+        if before["name"] != after["name"] or abs(before["height_m"] - after["height_m"]) >= 0.05:
             text += (
                 f" from {on_phrase(before).removeprefix('on ')} onto {on_phrase(after).removeprefix('on ')}"
             )
@@ -150,7 +162,7 @@ def check_from(o: Obj, clouds, views, times) -> dict:
     i = best_frames(clouds[o.side].xyz[o.idx], views[o.side], k=1, min_points=1)[0]
     pose = views[o.side].c2w[i]
     return {
-        "video": "before" if o.side == 0 else "after",
+        "video": "before",
         "time_s": round(float(times[o.side][i]), 1),
         "position": [round(float(x), 3) for x in pose[:3, 3]],
         "look_at": [round(float(x), 3) for x in clouds[o.side].xyz[o.idx].mean(0)],

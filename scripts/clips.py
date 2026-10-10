@@ -10,7 +10,9 @@ def reencode(src: Path, dst: Path, long_side: int = 1280, part: tuple[float, flo
         n = sum(1 for _ in container.decode(video=0))
     first, last = int(part[0] * n), int(part[1] * n)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    with av.open(str(src)) as container, av.open(str(dst), "w") as out:
+    # Write beside the target and move it into place, so src == dst cannot truncate the input.
+    tmp = dst.with_name(dst.stem + ".part.mp4")
+    with av.open(str(src)) as container, av.open(str(tmp), "w") as out:
         stream = container.streams.video[0]
         enc = None
         for i, f in enumerate(container.decode(stream)):
@@ -27,4 +29,5 @@ def reencode(src: Path, dst: Path, long_side: int = 1280, part: tuple[float, flo
                 enc.pix_fmt, enc.options = "yuv420p", {"crf": "23", "preset": "slow"}
             out.mux(enc.encode(av.VideoFrame.from_ndarray(img, format="rgb24")))
         out.mux(enc.encode())
+    tmp.replace(dst)
     return dst

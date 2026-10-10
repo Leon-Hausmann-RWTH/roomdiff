@@ -76,7 +76,7 @@
       <input id="edit" type="range" min="0" max="1" step="0.01" value="0" aria-label="Share of the detected edits applied to the before scene">
       <span id="editval">0 %</span>
     </div>
-    <div class="hint">Slider: the detected edits applied to the before scene, from none to all.</div>
+    <div class="hint">Slider: the confirmed edits applied to the before scene, from none to all; unverified ones stay as filmed.</div>
     <div class="toggles">
       <label><input type="checkbox" id="showUnchecked"> areas not checked</label>
       <label><input type="checkbox" id="showPaths"> camera paths</label>
@@ -156,12 +156,14 @@ function split(part) {
 
 // Points the other video could not check: seen in fewer than three of its frames (per video, as in the top view),
 // or hidden from it behind something nearer.
+// In Overlay the points already carry the video colours, so there the tint is one light grey.
 const UNCHECKED = { before: [0.42, 0.8, 0.66], after: [0.96, 0.74, 0.3] }, HIDDEN = [0.66, 0.56, 0.92];
+const unchecked = side => mode === 'Overlay' ? [0.85, 0.85, 0.85] : UNCHECKED[side];
 function paint(p, f, tint, side) {
   const src = p.userData.rgb, st = p.userData.st, dst = p.geometry.attributes.color.array;
   for (let i = 0; i < src.length; i += 3) {
     let o = f(src[i], src[i + 1], src[i + 2], 0.3 * src[i] + 0.59 * src[i + 1] + 0.11 * src[i + 2]);
-    const t = !tint ? null : st[i / 3] === 3 ? UNCHECKED[side] : st[i / 3] === 2 ? HIDDEN : null;
+    const t = !tint ? null : st[i / 3] === 3 ? unchecked(side) : st[i / 3] === 2 ? HIDDEN : null;
     if (t) o = o.map((x, k) => 0.35 * x + 0.65 * t[k]);
     dst[i] = o[0]; dst[i + 1] = o[1]; dst[i + 2] = o[2];
   }
@@ -218,6 +220,8 @@ const items = R.changes.map(c => {
     const g = new THREE.Group(), pts = clouds[side].get(c.id), f = fill(b, color, 0.3);
     const e = k === 'unverified' ? edges(b, '#3f3f44', true) : edges(b, color, false);
     const tag = label(`${STYLE[k][1]} ${c.id}`, color, b);
+    // A move's tag hangs below its box top, so the arrow head, which ends above the box, stays visible.
+    if (c.type === 'moved') tag.center.set(0.5, 1.2);
     if (pts) g.add(pts);
     g.add(e, f, tag);
     scene.add(g);
@@ -304,7 +308,8 @@ function apply() {
   statics[1].visible = mode !== 'Before';
   fade(revealed, mode === 'Before' ? s : 1);
   items.forEach(o => {
-    const t = o.c.type, B = o.before, A = o.after;
+    // The slider applies confirmed edits only; an unverified one stays as the before video filmed it.
+    const t = o.c.type, B = o.before, A = o.after, s = o.k === 'unverified' ? 0 : edit;
     let pb = 1, eb = 1, pa = 1, ea = 1;
     if (mode === 'Before') {
       if (t === 'removed') { pb = 1 - s; eb = Math.max(0.3, 1 - s); }
@@ -328,8 +333,8 @@ function apply() {
       // The selected change draws over the points in front of it, so a flat object is not buried in its support.
       [part.e, part.f, part.pts].forEach(m => { if (m) { m.material.depthTest = !sel; m.renderOrder = sel ? 9 : 0; } });
     });
-    // A move gets one tag, like the top view: on the object that travels, or on its new place in the after view.
-    if (t === 'moved') { B.tag.visible = mode !== 'After'; A.tag.visible = mode === 'After'; }
+    // A move gets one tag, like the top view: on its new place, or on the object as it travels in the before view.
+    if (t === 'moved') { B.tag.visible = mode === 'Before'; A.tag.visible = mode !== 'Before'; }
   });
   paths.visible = $('showPaths').checked;
   items.forEach(o => { if (o.ghost) o.ghost.visible = $('showFilm').checked || selected === o; });
@@ -339,10 +344,13 @@ function apply() {
 function legend() {
   const kinds = ['removed', 'added', 'moved', 'unverified'].map(k => `<span>${tagHtml(k, '')}${k === 'unverified' ? 'unverified, dashed' : k}</span>`);
   const sw = c => `<i class="sw" style="background:rgb(${c.map(x => Math.round(255 * x)).join(',')})"></i>`;
-  if ($('showUnchecked').checked) {
-    SIDES.forEach(s => kinds.push(`<span>${sw(UNCHECKED[s])}${s} video: too few views from the other</span>`));
-    kinds.push(`<span>${sw(HIDDEN)}hidden from the other video</span>`);
+  if ($('showUnchecked').checked && mode === 'Overlay') kinds.push(`<span>${sw(unchecked())}too few views from the other video</span>`);
+  else if ($('showUnchecked').checked) {
+    // Only the videos whose points are on screen: Before shows after points only once edits apply.
+    const shown = { before: mode !== 'After', after: mode !== 'Before' || edit > 0.01 };
+    SIDES.filter(s => shown[s]).forEach(s => kinds.push(`<span>${sw(UNCHECKED[s])}${s} video: too few views from the other</span>`));
   }
+  if ($('showUnchecked').checked) kinds.push(`<span>${sw(HIDDEN)}hidden from the other video</span>`);
   if (items.some(o => o.ghost && o.ghost.visible)) kinds.push('<span><i class="sw" style="border:2px solid #55555a"></i>grey camera: where to film next</span>');
   if (mode === 'Overlay' || paths.visible) SIDES.forEach(s => kinds.push(`<span><i class="sw" style="background:${VIDEO[s]}"></i>${s} video</span>`));
   // Rebuilt on every slider step while playing, so touch the DOM only when the content changes.
