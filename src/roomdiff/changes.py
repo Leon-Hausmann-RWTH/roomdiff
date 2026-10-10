@@ -32,7 +32,7 @@ class Change:
 
 
 def fit_box(xyz: np.ndarray) -> Box:
-    """Gravity-aligned box: yaw from the principal axis of the footprint, robust to a few stray points."""
+    """Gravity-aligned box: yaw from the principal axis of the footprint, which stray points barely move."""
     lo, hi = np.percentile(xyz, 2, 0), np.percentile(xyz, 98, 0)
     xy = xyz[:, :2] - xyz[:, :2].mean(0)
     evals, evecs = np.linalg.eigh(np.cov(xy.T) if len(xy) > 2 else np.eye(2))

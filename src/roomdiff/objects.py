@@ -243,10 +243,16 @@ def verdict(o: Obj, cloud: Cloud, state: np.ndarray, cfg: Config) -> None:
     o.shares = {k: round(float(np.mean(st == s)), 3) for k, s in names} | {"points": int(len(st))}
     decided = o.shares["free"] + o.shares["seen"]
     ratio = o.shares["free"] / max(decided, 1e-9)
-    other = "after" if o.side == 0 else "before"
+    other, still = ("after", "still") if o.side == 0 else ("before", "already")
     looked, saw = f"{100 * ratio:.0f} %", f"{100 * (1 - ratio):.0f} %"
+    z = cloud.xyz[o.idx, 2]
+    height = np.percentile(z, 97) - np.percentile(z, 3)
     if decided < cfg.min_observed:
-        why = "hidden behind other things" if o.shares["occluded"] > o.shares["unreached"] else "out of view"
+        why = (
+            "hidden behind other things"
+            if o.shares["occluded"] > o.shares["unreached"]
+            else "seen too rarely"
+        )
         o.status = "unverified"
         o.reason = f"the {other} video could check only {100 * decided:.0f} % of it; the rest was {why}"
     elif ratio >= cfg.confirm_ratio:
@@ -255,6 +261,13 @@ def verdict(o: Obj, cloud: Cloud, state: np.ndarray, cfg: Config) -> None:
             f"the {other} video looked through {looked} of the points it could check",
         )
     elif ratio >= cfg.partial_ratio:
-        o.status, o.reason = "partial", f"the {other} video looked through {looked} of it and still saw {saw}"
+        o.status = "partial"
+        # body() keeps the contact zone of an object this flat; its seen points are the surface under it.
+        o.reason = (
+            f"the {other} video looked through {looked} of it; at {100 * height:.0f} cm tall, the rest "
+            "cannot be told apart from the surface under it"
+            if height <= 0.06
+            else f"the {other} video looked through {looked} of it and {still} saw {saw}"
+        )
     else:
-        o.status, o.reason = "dismissed", f"the {other} video still saw {saw} of it"
+        o.status, o.reason = "dismissed", f"the {other} video {still} saw {saw} of it"

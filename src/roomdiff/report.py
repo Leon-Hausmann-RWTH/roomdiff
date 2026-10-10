@@ -99,9 +99,9 @@ def card(image: np.ndarray, K: np.ndarray, c2w: np.ndarray, box: dict, c: dict, 
     img = Image.fromarray(image).crop((x0, y0, x0 + cw, y0 + cw * 3 / 4)).resize(CARD, Image.LANCZOS)
     segs = (segs - [x0, y0]) * CARD[0] / cw
     d, k, f = ImageDraw.Draw(img, "RGBA"), kind(c), font(20)
-    for width, color in ((8, (0, 0, 0, 110)), (4, COLORS[k])):
+    for width, color, dash in ((8, (0, 0, 0, 110), 0), (4, COLORS[k], 20 if k == "unverified" else 0)):
         for seg in segs:
-            ring(d, seg, color, width, dash=12 if k == "unverified" else 0, closed=False)
+            ring(d, seg, color, width, dash=dash, closed=False)
     top = segs.reshape(-1, 2).min(0)
     tag(d, np.clip(top[0], 6, CARD[0] - 90), np.clip(top[1] - 44, 6, CARD[1] - 44), k, str(c["id"]), 36)
     w = d.textlength(caption, font=f)
@@ -116,6 +116,8 @@ def write_cards(
     # objects[id] holds the object's world points in each video, None where it is absent; views are
     # Views at reconstruction resolution and hires the keyframes at a whole multiple of it.
     (out_dir / "cards").mkdir(parents=True, exist_ok=True)
+    for old in (out_dir / "cards").glob("*.jpg"):
+        old.unlink()
     sharp = []  # per video, (N,) variance of the Laplacian of each keyframe, higher is sharper
     for g in (h[:, ::2, ::2].astype(np.float32).mean(-1) for h in hires):
         lap = 4 * g[:, 1:-1, 1:-1] - g[:, :-2, 1:-1] - g[:, 2:, 1:-1] - g[:, 1:-1, :-2] - g[:, 1:-1, 2:]
@@ -131,7 +133,13 @@ def write_cards(
                 continue
             K = views[s].K[i].copy()
             K[:2] *= hires[s].shape[2] / views[s].depth.shape[2]
-            empty = "" if present else ", same place" if c["status"] == "unverified" else ", place empty"
+            empty = (
+                ""
+                if present
+                else ", same place"
+                if c["status"] == "unverified"
+                else (", not there yet", ", gone")[s]
+            )
             caption = f"{side} video, frame {views[s].frame_ids[i]}{empty}"
             out = out_dir / c["cards"][side]
             card(hires[s][i], K, views[s].c2w[i], box, c, caption).save(out, quality=88)
@@ -149,7 +157,8 @@ def write_floorplan(
     hi = lo + np.ceil((ext.max(0) + 0.3 - lo) / 0.1) * 0.1
     s = min(PLAN[0] / (hi - lo)[0], PLAN[1] / (hi - lo)[1])  # pixels per metre
     pw, ph, m = int((hi - lo)[0] * s), int((hi - lo)[1] * s), 40
-    img = Image.new("RGB", (pw + 510 + 3 * m, max(ph, 900) + 2 * m), "white")
+    # Tall enough for the legend with one row per change; cropped to what was drawn at the end.
+    img = Image.new("RGB", (pw + 510 + 3 * m, max(ph, 1000 + 50 * len(changes)) + 2 * m), "white")
 
     def px(p) -> np.ndarray:
         p = np.asarray(p)
@@ -188,11 +197,14 @@ def write_floorplan(
             taken.append((*fp.min(0), *fp.max(0)))
         if c["type"] == "moved":
             a, b = px(c["box_before"]["center"][:2]), px(c["box_after"]["center"][:2])
-            v = (b - a) / max(np.linalg.norm(b - a), 1e-6)
-            b = b - v * (min(c["box_after"]["size"][:2]) * s / 2 + 4)  # end the arrow at the outline, roughly
-            n = np.array([-v[1], v[0]]) * 14
-            d.line([tuple(a), tuple(b - v * 20)], fill=col, width=5)
-            d.polygon([tuple(b), tuple(b - v * 30 + n), tuple(b - v * 30 - n)], fill=col)
+            n_ab = max(np.linalg.norm(b - a), 1e-6)
+            v = (b - a) / n_ab
+            # End at the outline, roughly, but keep a short move readable as an arrow.
+            b = a + v * max(n_ab - min(c["box_after"]["size"][:2]) * s / 2 - 4, min(n_ab, 60))
+            h = min(30, 0.5 * n_ab)
+            n = np.array([-v[1], v[0]]) * h / 2
+            d.line([tuple(a), tuple(b - v * (h - 10))], fill=col, width=5)
+            d.polygon([tuple(b), tuple(b - v * h + n), tuple(b - v * h - n)], fill=col)
         if c["check_from"]:
             camera_glyph(d, px(c["check_from"]["position"][:2]), px(c["check_from"]["look_at"][:2]))
     # Tags go on top, at the first corner of their footprint that is clear of footprints and other tags.
@@ -207,8 +219,8 @@ def write_floorplan(
         else:
             x, y = spots[0]
         taken.append(tag(d, x, y, kind(c), str(c["id"]), 40))
-    legend(d, pw + 2 * m, m, result, s)
-    img.save(path)
+    bottom = legend(d, pw + 2 * m, m, result, s)
+    img.crop((0, 0, img.width, max(ph + 2 * m, bottom + m))).save(path)
 
 
 def camera_glyph(d: ImageDraw.ImageDraw, p: np.ndarray, target: np.ndarray) -> None:
@@ -219,7 +231,7 @@ def camera_glyph(d: ImageDraw.ImageDraw, p: np.ndarray, target: np.ndarray) -> N
     d.polygon([tuple(q) for q in wedge], fill=(*GREY, 110), outline=GREY, width=3)
 
 
-def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> None:
+def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> int:
     f = font(26)
     d.text((x, y), "Top view of the changes", font=font(32), fill="black")
     d.text((x, y + 44), f"{result['before']} and {result['after']}", font=font(23), fill=(100, 100, 100))
@@ -230,16 +242,25 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> No
         d.text((x + dx, y + (17 if dx else 24)), text, font=f, fill="black", anchor="lm" if dx else "la")
         y += dy
 
+    for c in result["changes"]:
+        r = tag(d, x, y, kind(c), str(c["id"]), 34)
+        move = f" {c['motion']['distance_m']:.1f} m" if c["motion"] else ""
+        text = f"{c['title']}, {c['type']}{move}"
+        size = 26 if d.textlength(text, font=f) < x + 500 - r[2] else 20
+        d.text((r[2] + 14, y + 17), text, font=font(size), fill="black", anchor="lm")
+        y += 50
+    y += 20
     texts = {"moved": "moved, arrow from old to new place", "unverified": "unverified, dashed outline"}
     for k in COLORS:
         tag(d, x, y, k, "", 34)
         row(texts.get(k, k))
-    camera_glyph(d, np.array([x + 2.0, y + 17]), np.array([x + 54.0, y + 17]))
-    row("where to film next (unverified)")
-    row("Not checked", 0, 70)
+    if any(c["check_from"] for c in result["changes"]):
+        camera_glyph(d, np.array([x + 2.0, y + 17]), np.array([x + 54.0, y + 17]))
+        row("where to film next (unverified)")
+    row("Not checked by the other video", 0, 70)
     for side in SIDES:
         d.rectangle((x, y, x + 48, y + 34), fill=(*VIDEO_RGB[side], 60))
-        row(f"seen only in the {side} video")
+        row(f"surface from the {side} video")
     row("Context", 0, 70)
     for i in range(48):
         d.line([(x + i, y), (x + i, y + 34)], fill=(int(236 - 116 * i / 47),) * 3)
@@ -249,6 +270,7 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> No
     row("camera paths of both videos")
     d.rectangle((x, y + 12, x + s, y + 22), fill="black")
     row("1 m", s + 14)
+    return y
 
 
 def pct(x: float) -> str:
@@ -265,12 +287,17 @@ def write_report(path: Path, result: dict) -> None:
     found = ", ".join(f"{n[t]} {t}" for t in ("moved", "added", "removed") if n[t])
     found = f"{total} change{'s' * (total != 1)}: {found}" if total else "no changes"
     found += f"; {n['unverified']} of them unverified" if n["unverified"] else ""
-    words = {"free": "looked through", "seen": "still seen", "occluded": "hidden", "unreached": "not in view"}
+    words = {
+        "free": "looked through",
+        "seen": "surface seen",
+        "occluded": "hidden",
+        "unreached": "too few views",
+    }
     rows, sections = [], []
     for c in result["changes"]:
         mo, w, e, g = c["motion"], c["check_from"], c["evidence"], GLYPHS[kind(c)]
         blocked = c["floor_blocked_m2"]
-        rows.append(f"| {c['id']} | {g} | {c['type']} | {c['label']} | {c['status']} | {c['sentence']} |")
+        rows.append(f"| {c['id']} | {g} | {c['type']} | {c['title']} | {c['status']} | {c['sentence']} |")
         turn = f", turned {mo['turn_deg']:.0f} degrees" if mo and mo["turn_deg"] is not None else ""
         shares = ", ".join(f"{pct(e[k])} {v}" for k, v in words.items() if round(100 * e[k]))
         facts = [
@@ -281,23 +308,36 @@ def write_report(path: Path, result: dict) -> None:
             f"Evidence: {e['points']:,} points: {shares}.",
         ]
         cards = [f'<img src="{p}" width="49%">' if p else f"(no {s} view)" for s, p in c["cards"].items()]
-        sections.append(f"## {g} {c['id']}: {c['label']}, {c['type']}\n\n{c['sentence']}\n\n")
+        sections.append(f"## {g} {c['id']}: {c['title']}, {c['type']}\n\n{c['sentence']}\n\n")
         sections[-1] += "\n".join(f"- {f}" for f in facts if f) + "\n\n" + " ".join(cards) + "\n"
-    only = [f"{pct(cov['only_' + v])} only in the {v} video" for v in SIDES if round(100 * cov["only_" + v])]
-    one = only and f" The rest was seen by one video only: {join_and(only)}; the top view tints those parts."
-    one = one or ""
+    only = [
+        f"{pct(cov['unchecked_' + v])} from the {v} video"
+        for v in SIDES
+        if round(100 * cov["unchecked_" + v])
+    ]
+    rest = " The other video saw the rest in fewer than three frames"
+    one = f"{rest}: {join_and(only)}; the top view tints them." if only else ""
     checked = f"The other video checked {pct(cov['checked'])} of all surface points"
     checked += f"; {pct(cov['hidden'])} were hidden from it."
     names = ("confirmed changes", "unverified changes", "dismissed candidates", "no candidate")
     keys = ("confirmed", "unverified", "dismissed", "residual")
     ledger = join_and([f"{pct(led[k])} {v}" for k, v in zip(keys, names) if round(100 * led[k])])
     table, body = "\n".join(rows), "\n".join(sections)
+    unverified = (
+        "Unverified means not enough evidence either way: the other video saw too little of it, part of it "
+        "is still there, or it is too flat to tell from the surface under it.\n"
+        if n["unverified"]
+        else ""
+    )
+    height = (
+        f"The camera was held {result['camera_height_m']:.2f} m above the floor."
+        if result["floor_found"]
+        else "No plausible floor was found, so heights count from the lowest large level surface."
+    )
     path.write_text(f"""# What changed in the room
 
 Between {result["before"]} and {result["after"]} roomdiff found {found}.
-Unverified means not enough evidence either way: the other video saw too little of it, or part of it is still
-there. The camera was held {result["camera_height_m"]:.2f} m above the floor; positions are in metres with z
-up and the floor at z = 0.
+{unverified}{height} Boxes and positions are in changes.json; its "frame" field gives the axes.
 
 ![Top view of the changes](floorplan.png)
 
@@ -314,7 +354,8 @@ The points the other video looked through belong to: {ledger}.
 
 ## Method
 
-Both videos were reconstructed in one pass into a shared metric frame with z up and the floor at z = 0. A
-surface counts as removed or added only where the other video looked through the place it occupied, and each
-change keeps the share of its points that were looked through, still seen, hidden or not in view.
+Both videos were reconstructed in one pass into a shared metric frame with z up. A surface counts as removed
+or added only where the other video looked through the place it occupied. Each change keeps the share of its
+points that the other video looked through, saw as a surface, had hidden behind something nearer, or saw in
+fewer than three frames (too few views).
 """)

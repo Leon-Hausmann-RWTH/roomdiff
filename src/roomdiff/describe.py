@@ -7,6 +7,10 @@ from .geometry import Cloud, Views
 from .objects import Obj, best_frames, hires, visible
 from .semantics import color_name, crop, label
 
+# On 80 SceneDiff objects SigLIP was right for 95 % of names scored 0.5 or more and often wrong under 0.35;
+# below it the name is given as a guess instead of confidently.
+HEDGE = 0.35
+
 
 def mask_box(m: np.ndarray) -> tuple[int, int, int, int]:
     ys, xs = np.nonzero(m)
@@ -25,9 +29,9 @@ def support(o: Obj, cloud: Cloud, state: np.ndarray, taken: np.ndarray, floor_fo
     """What the object stands on: the floor, or the static surface right under its footprint."""
     xyz = cloud.xyz[o.idx]
     bottom = float(np.percentile(xyz[:, 2], 3))
-    if bottom < 0.08:
-        # Near z = 0 only geometry decides: the floor if a floor plane was found, else no name at all.
-        return {"name": "floor" if floor_found else None, "height_m": 0.0, "points": None}
+    if bottom < 0.08 and floor_found:
+        # Only geometry names the floor; without a plausible floor plane z = 0 is just the lowest surface.
+        return {"name": "floor", "height_m": 0.0, "points": None}
     lo, hi = xyz[:, :2].min(0) - 0.05, xyz[:, :2].max(0) + 0.05
     z = cloud.xyz[:, 2]
     under = (
@@ -62,7 +66,7 @@ def on_phrase(s: dict) -> str:
     if s["name"] == "floor":
         return "on the floor"
     cm = round(s["height_m"] * 100)
-    return f"on the {s['name']} ({cm} cm up)" if s["name"] else f"on a surface {cm} cm above the floor"
+    return f"on the {s['name']} ({cm} cm up)" if s["name"] else f"on a surface {cm} cm up"
 
 
 def name_changes(
@@ -96,17 +100,16 @@ def name_changes(
         objs = [o for o in (c.before, c.after) if o is not None]
         c.label, c.facts["label_score"] = word, round(float(score), 3)
         colour = color_name(np.concatenate([object_pixels(o, images) for o in objs]))
-        # On 80 SceneDiff objects SigLIP was right for 95 % of names scored 0.5 or more and often wrong
-        # under 0.35; say so instead of naming confidently.
-        name = "object" if score < 0.35 else f"{colour} {word}" if colour else word
-        hedge = f", possibly {article(word)}," if score < 0.35 else ""
-        c.facts["height_m"] = round(float(fit_box(clouds[objs[0].side].xyz[objs[0].idx]).size[2]), 2)
+        name = "object" if score < HEDGE else f"{colour} {word}" if colour else word
+        hedge = f", possibly {article(word)}," if score < HEDGE else ""
+        c.facts["title"] = f"possibly {article(word)}" if score < HEDGE else word
         if c.kind != "removed" and c.facts["support"].get("after", {}).get("name") == "floor":
             # For a robot the question is what is now in the way.
             end = fit_box(clouds[objs[-1].side].xyz[objs[-1].idx])
             c.facts["floor_blocked_m2"] = round(float(end.size[0] * end.size[1]), 2)
-        # A viewpoint helps only where the other video saw too little, not where part is still there.
-        if c.status == "unverified" and c.lead.status == "unverified":
+        # A viewpoint helps only where the other video saw too little, not where part is still there, and
+        # only for a removal: filming again today cannot show what stood somewhere before.
+        if c.status == "unverified" and c.lead.status == "unverified" and c.lead.side == 0:
             c.facts["check_from"] = check_from(c.lead, clouds, views, times)
         c.sentence = sentence(c, name, hedge, cfg.min_turn)
 
@@ -121,7 +124,7 @@ def sentence(c: Change, name: str, hedge: str, min_turn: float = 15.0) -> str:
             before["name"],
             after["name"],
         ):
-            after = before
+            before = after = before if before["name"] else after
         if before["name"] != after["name"]:
             text += (
                 f" from {on_phrase(before).removeprefix('on ')} onto {on_phrase(after).removeprefix('on ')}"
@@ -141,15 +144,14 @@ def sentence(c: Change, name: str, hedge: str, min_turn: float = 15.0) -> str:
 
 
 def check_from(o: Obj, clouds, views, times) -> dict:
-    """The camera pose that would settle an unverified change: the keyframe that saw the object best.
-
-    Turning "could not check" into a place to stand is what a robot needs to resolve it.
+    """Where to film again: the before keyframe that saw the object best. A new view from there shows
+    whether it is still in place; turning "could not check" into a place to stand is what a robot needs.
     """
     i = best_frames(clouds[o.side].xyz[o.idx], views[o.side], k=1, min_points=1)[0]
     pose = views[o.side].c2w[i]
     return {
         "video": "before" if o.side == 0 else "after",
         "time_s": round(float(times[o.side][i]), 1),
-        "position": np.round(pose[:3, 3], 3).tolist(),
-        "look_at": np.round(clouds[o.side].xyz[o.idx].mean(0), 3).tolist(),
+        "position": [round(float(x), 3) for x in pose[:3, 3]],
+        "look_at": [round(float(x), 3) for x in clouds[o.side].xyz[o.idx].mean(0)],
     }

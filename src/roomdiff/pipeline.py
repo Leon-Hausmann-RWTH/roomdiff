@@ -28,6 +28,12 @@ from .search import find_other_ends
 from .viewer import write_viewer
 from .world import Frame, transform, world_frame
 
+FRAME = (
+    "One frame for both videos, new for each run: metres, right-handed, z up, x along one of the main wall "
+    "directions, origin below the middle of the scene,"
+)
+NO_FLOOR = " z = 0 at the lowest large level surface (no plausible floor found)."
+
 
 @dataclass
 class Result:
@@ -39,24 +45,39 @@ class Result:
     states: tuple[np.ndarray, np.ndarray]  # per-point evidence state of each cloud against the other video
     changes: list[Change]
     dismissed: list[Obj]
+    warnings: list[str]
 
 
 def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result:
+    warnings = []
+
+    def warn(text: str) -> None:
+        print(f"warning: {text}")
+        warnings.append(text)
+
     recon = reconstruct(before, after, cfg, required)
+    if len({h > w for h, w in (k.source_hw for k in recon.keys)}) > 1:
+        warn("one video is portrait and the other landscape; both were cropped to one shape")
+    if max(recon.fit_px) > 2:
+        warn("the predicted rays fit a pinhole camera poorly (a wide-angle lens?)")
     t = time.time()
     va, vb = to_views(recon, cfg)
     frame = world_frame(va, vb)
     va, vb = transform(va, frame.T), transform(vb, frame.T)
     print(f"world frame: camera {frame.camera_height:.2f} m above the floor ({time.time() - t:.1f} s)")
-    if not frame.floor_found or not 0.5 < frame.camera_height < 2.2:
-        print("warning: no plausible floor plane; heights and 'on the floor' statements may be wrong")
+    if not frame.up_from_cameras:
+        warn("both videos look in almost one direction; gravity comes from surface normals")
+    if not frame.floor_found:
+        warn(
+            "no plausible floor plane: z = 0 is the lowest large level surface, and no object is on the floor"
+        )
 
     t = time.time()
     for own, name in ((va, "before"), (vb, "after")):
         bad = np.nonzero(frame_conflicts(own, cfg) > cfg.max_frame_conflict)[0]
         own.depth[bad] = 0
         if len(bad):
-            print(f"warning: dropped {name} keyframes {bad.tolist()}: the rest of the video contradicts them")
+            warn(f"dropped {name} keyframes {bad.tolist()}: the rest of the video contradicts them")
     clouds = []
     for own in (va, vb):
         c = cloud_from_views(own, cfg.voxel)
@@ -97,7 +118,7 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
         f"changes: {len(changes)}, {len(pairs)} matched as moves, {len(found)} more found in the other "
         f"video ({time.time() - t:.1f} s)"
     )
-    return Result((before, after), recon, frame, views, clouds, states, changes, dismissed)
+    return Result((before, after), recon, frame, views, clouds, states, changes, dismissed, warnings)
 
 
 def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
@@ -118,8 +139,10 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
     result = {
         "before": r.paths[0].name,
         "after": r.paths[1].name,
-        "units": "metres, z up, floor at z = 0",
+        "frame": FRAME + (" floor at z = 0." if r.frame.floor_found else NO_FLOOR),
         "camera_height_m": round(r.frame.camera_height, 2),
+        "floor_found": r.frame.floor_found,
+        "warnings": r.warnings,
         "counts": {k: sum(c.kind == k for c in r.changes) for k in ("moved", "added", "removed")}
         | {"unverified": sum(c.status == "unverified" for c in r.changes)},
         "changes": changes,
@@ -132,7 +155,7 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
     }
     write_cards(out, changes, objects, r.views, images)
     (out / "changes.json").write_text(json.dumps(result, indent=1))
-    write_ply(out / "scene.ply", ca, cb, ids)
+    write_ply(out / "scene.ply", ca, cb, ids, r.states)
     cameras = (r.views[0].c2w, r.views[1].c2w)
     write_floorplan(out / "floorplan.png", ca, cb, r.states, result, cameras)
     write_report(out / "report.md", result)
@@ -142,14 +165,14 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
 
 
 def coverage(states: tuple[np.ndarray, np.ndarray]) -> dict:
-    """Shares of all surface points: checked by the other video (seen or free), hidden from it, or
-    seen by one video only. Hidden points carry no information either way."""
+    """Shares of all surface points: checked by the other video (seen or free), hidden from it, or seen
+    by it in fewer than min_decisive frames. Hidden and unchecked points carry no information either way."""
     total = sum(len(s) for s in states)
     share = lambda keep: round(float(sum(int(keep(s).sum()) for s in states)) / total, 3)  # noqa: E731
     out = {"checked": share(lambda s: np.isin(s, (SEEN, FREE))), "hidden": share(lambda s: s == OCCLUDED)}
     return out | {
         k: round(float((s == UNREACHED).sum()) / total, 3)
-        for k, s in zip(("only_before", "only_after"), states)
+        for k, s in zip(("unchecked_before", "unchecked_after"), states)
     }
 
 

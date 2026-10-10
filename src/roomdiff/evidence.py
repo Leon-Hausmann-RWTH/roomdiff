@@ -36,7 +36,7 @@ def count_evidence(
 ) -> Evidence:
     """Test every point against every frame of a video along that frame's line of sight.
 
-    The per-pixel test is the one in SceneDiff's foreground_distance (Wu et al., ECCV 2026) and the
+    The per-pixel test is the one in SceneDiff's foreground_distance (Wu et al., arXiv 2512.16908) and the
     ray reasoning of Fehr et al. (ICRA 2017) and Khronos (Schmid et al., RSS 2024); here the votes
     are counted over all frames and camera positions instead of averaged per pixel.
     """

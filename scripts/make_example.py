@@ -1,24 +1,28 @@
-"""Rebuild the committed example and the README media from two videos.
+"""Rebuild a committed example and the README media from two videos.
 
 Writes examples/<name>/{before.mp4, after.mp4} (small upright copies), examples/<name>/output/ (the
-normal run on those copies), docs/index.html (the viewer, for GitHub Pages) and docs/media/.
+normal run on those copies), the viewer for GitHub Pages (docs/index.html for the main example, else
+docs/<name>.html) and docs/media/. Needs Playwright's browser once: uv run playwright install chromium.
 
-    uv run python scripts/make_example.py before.mov after.mov --name living_room
+    uv run python scripts/make_example.py before.mov after.mov --name my_room
 """
 
 import io
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import tyro
 from clips import reencode
-from PIL import Image
+from evaluate import naive
+from PIL import Image, ImageColor, ImageDraw
 from playwright.sync_api import sync_playwright
 
 from roomdiff.config import Config
-from roomdiff.pipeline import analyse, write_outputs
+from roomdiff.evidence import FREE, OCCLUDED, SEEN, UNREACHED
+from roomdiff.pipeline import Result, analyse, write_outputs
+from roomdiff.report import COLORS, corners, font, kind, ring, tag
 
 GL = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 SET_SLIDER = (
@@ -30,9 +34,11 @@ SET_SLIDER = (
 class Args:
     before: tyro.conf.Positional[Path]
     after: tyro.conf.Positional[Path]
-    name: str = "living_room"
+    name: str
+    """Folder name under examples/."""
     docs: bool = True
-    """Also make this the example behind docs/index.html, the GIF and the floor plan in the README."""
+    """Make this the main example: docs/index.html, the GIF and the floor plan in the README."""
+    config: Config = field(default_factory=Config)
 
 
 def slider_gif(viewer: Path, path: Path, frames: int = 40) -> None:
@@ -63,17 +69,82 @@ def slider_gif(viewer: Path, path: Path, frames: int = 40) -> None:
     print(f"{path}: {path.stat().st_size / 1e6:.1f} MB")
 
 
-def card_strip(output: Path, path: Path, n: int = 3) -> None:
+def card_strip(output: Path, result: dict, path: Path, n: int = 3) -> None:
     """Before and after cards of the first changes side by side: the evidence at a glance."""
     rows = []
-    for card in sorted((output / "cards").glob("*_before.jpg"), key=lambda p: int(p.name.split("_")[0]))[:n]:
-        pair = [Image.open(card), Image.open(card.with_name(card.name.replace("before", "after")))]
+    for c in [c for c in result["changes"] if all(c["cards"].values())][:n]:
+        pair = [Image.open(output / c["cards"][side]) for side in ("before", "after")]
         h = 300
         pair = [im.resize((round(im.width * h / im.height), h)) for im in pair]
         rows.append(np.concatenate([np.asarray(im) for im in pair], 1))
+    if not rows:
+        print("no change with both cards; no card strip written")
+        return
     width = max(r.shape[1] for r in rows)
     rows = [np.pad(r, ((0, 8), (0, width - r.shape[1]), (0, 0)), constant_values=255) for r in rows]
     Image.fromarray(np.concatenate(rows)).save(path, quality=85)
+
+
+# What the ray test says about a region that nearest-neighbour differencing would report as a change.
+VERDICTS = [
+    (FREE, (29, 29, 31), "looked through by the other video"),
+    (OCCLUDED, (150, 120, 230), "hidden from the other video"),
+    (UNREACHED, (240, 175, 60), "seen by it in fewer than 3 frames"),
+    (SEEN, (150, 150, 155), "seen by it as a surface"),
+]
+
+
+def evidence_figure(res: Result, result: dict, cfg: Config, path: Path) -> None:
+    """Top view of every region where the two clouds differ by more than 5 cm, coloured by its ray-test
+    state, with the changes roomdiff reports drawn on top."""
+    regions = naive(res, cfg)
+    xyz = np.concatenate([c.xyz for c in res.clouds])
+    lo, hi = np.percentile(xyz[:, :2], 0.5, 0) - 0.2, np.percentile(xyz[:, :2], 99.5, 0) + 0.2
+    s, m = 900 / (hi - lo).max(), 40  # pixels per metre, margin
+    pw, ph = np.ceil((hi - lo) * s).astype(int)
+    canvas = np.full((ph + 2 * m, pw + 2 * m + 660, 3), 255, np.uint8)
+
+    def px(p: np.ndarray) -> np.ndarray:
+        return np.stack([m + (p[..., 0] - lo[0]) * s, m + (hi[1] - p[..., 1]) * s], -1)
+
+    def dots(p: np.ndarray, color, r: int) -> None:
+        q = np.round(px(p)).astype(int)
+        for dx in range(-r, r + 1):
+            for dy in range(-r, r + 1):
+                x, y = (q[:, 0] + dx).clip(0, pw + 2 * m - 1), (q[:, 1] + dy).clip(0, ph + 2 * m - 1)
+                canvas[y, x] = color
+
+    dots(xyz[:, :2], (222, 222, 222), 1)
+    colors, counts = {code: col for code, col, _ in VERDICTS}, dict.fromkeys(range(4), 0)
+    for c in regions:
+        o = c.before or c.after
+        code = int(np.bincount(res.states[o.side][o.idx], minlength=4).argmax())
+        counts[code] += 1
+        dots(res.clouds[o.side].xyz[o.idx, :2], colors[code], 2)
+    img = Image.fromarray(canvas)
+    d = ImageDraw.Draw(img, "RGBA")
+    for c in result["changes"]:
+        col = ImageColor.getrgb(COLORS[kind(c)])
+        for box in (b for b in (c["box_before"], c["box_after"]) if b):
+            fp = px(corners(box)[[0, 1, 3, 2], :2])
+            ring(d, fp, col, 4)
+        fp = px(corners(c["box_after"] or c["box_before"])[:, :2])
+        tag(d, fp[:, 0].max() + 6, fp[:, 1].min() - 40, kind(c), str(c["id"]), 34)
+    x, y, f = pw + 2 * m + 20, m, font(26)
+    d.text((x, y), "Where the two videos disagree", font=font(32), fill="black")
+    d.text((x, y + 44), f"{len(regions)} regions have no point of the other video", font=f, fill=(90, 90, 90))
+    d.text((x, y + 78), "within 5 cm: naive differencing reports each one", font=f, fill=(90, 90, 90))
+    y += 140
+    for code, col, text in VERDICTS:
+        d.rectangle((x, y, x + 40, y + 30), fill=col)
+        d.text((x + 56, y + 15), f"{counts[code]} {text}", font=f, fill="black", anchor="lm")
+        y += 48
+    ring(d, np.array([[x, y], [x + 40, y], [x + 40, y + 30], [x, y + 30]], float), (60, 60, 60), 4)
+    n = len(result["changes"])
+    d.text(
+        (x + 56, y + 15), f"{n} change{'s' * (n != 1)} roomdiff reports", font=f, fill="black", anchor="lm"
+    )
+    img.save(path)
 
 
 def main(args: Args) -> None:
@@ -81,14 +152,19 @@ def main(args: Args) -> None:
     before = reencode(args.before, root / "before.mp4")
     after = reencode(args.after, root / "after.mp4")
     output = root / "output"
-    write_outputs(analyse(before, after, Config()), output, Config())
+    res = analyse(before, after, args.config)
+    result = write_outputs(res, output, args.config)
     media = Path("docs/media")
     media.mkdir(parents=True, exist_ok=True)
-    card_strip(output, media / f"cards_{args.name}.jpg")
+    card_strip(output, result, media / f"cards_{args.name}.jpg")
     if args.docs:
-        shutil.copy(output / "viewer.html", "docs/index.html")
+        # The GIF first: it needs the browser, and a missing one should fail before docs/ changes.
         slider_gif(output / "viewer.html", media / "edit_slider.gif")
+        shutil.copy(output / "viewer.html", "docs/index.html")
         Image.open(output / "floorplan.png").save(media / "floorplan.png")
+        evidence_figure(res, result, args.config, media / "evidence_example.png")
+    else:
+        shutil.copy(output / "viewer.html", f"docs/{args.name}.html")
 
 
 if __name__ == "__main__":

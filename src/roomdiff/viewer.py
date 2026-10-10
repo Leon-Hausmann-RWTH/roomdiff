@@ -45,7 +45,7 @@ def write_viewer(
             "xyz": b64(c.xyz[keep].astype("<f4")),
             "rgb": b64(c.rgb[keep].astype("u1")),
             "cid": b64(cid[keep].astype("<i2")),  # id in result["changes"]; -1 unchanged, -2 revealed
-            "st": b64(state[keep].astype("u1")),  # evidence state against the other video, 3 = never reached
+            "st": b64(state[keep].astype("u1")),  # evidence state against the other video, as in evidence.py
         }
     cards = {
         c["id"]: {
@@ -62,7 +62,9 @@ def write_viewer(
         "result": result,
         "clouds": clouds,
         "cards": cards,
-        "cameras": {k: c2w[:, :3, 3].round(3).tolist() for k, c2w in zip(("before", "after"), cameras)},
+        "cameras": {
+            k: c2w[:, :3, 3].astype(float).round(3).tolist() for k, c2w in zip(("before", "after"), cameras)
+        },
         "center": ((lo + hi) / 2).tolist(),
         "radius": float(np.linalg.norm(hi - lo)),
     }

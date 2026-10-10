@@ -1,9 +1,7 @@
 # What changed in the room
 
 Between before.mp4 and after.mp4 roomdiff found 3 changes: 1 moved, 2 added.
-Unverified means not enough evidence either way: the other video saw too little of it, or part of it is still
-there. The camera was held 1.53 m above the floor; positions are in metres with z
-up and the floor at z = 0.
+The camera was held 1.53 m above the floor. Boxes and positions are in changes.json; its "frame" field gives the axes.
 
 ![Top view of the changes](floorplan.png)
 
@@ -19,7 +17,7 @@ The plastic bag moved 0.3 m along the desk.
 
 - Status: confirmed (the after video looked through 97 % of the points it could check).
 - Motion: 0.33 m.
-- Evidence: 517 points: 64 % looked through, 2 % still seen, 14 % hidden, 21 % not in view.
+- Evidence: 517 points: 64 % looked through, 2 % surface seen, 14 % hidden, 21 % too few views.
 
 <img src="cards/1_before.jpg" width="49%"> <img src="cards/1_after.jpg" width="49%">
 
@@ -28,7 +26,7 @@ The plastic bag moved 0.3 m along the desk.
 A yellow stuffed animal appeared on the shelf (84 cm up).
 
 - Status: confirmed (the before video looked through 64 % of the points it could check).
-- Evidence: 232 points: 61 % looked through, 34 % still seen, 5 % not in view.
+- Evidence: 232 points: 61 % looked through, 34 % surface seen, 5 % too few views.
 
 <img src="cards/2_before.jpg" width="49%"> <img src="cards/2_after.jpg" width="49%">
 
@@ -43,12 +41,13 @@ A black water bottle appeared on the desk (85 cm up).
 
 ## Coverage
 
-The other video checked 72 % of all surface points; 10 % were hidden from it. The rest was seen by one video only: 10 % only in the before video and 8 % only in the after video; the top view tints those parts.
+The other video checked 72 % of all surface points; 10 % were hidden from it. The other video saw the rest in fewer than three frames: 10 % from the before video and 8 % from the after video; the top view tints them.
 
 The points the other video looked through belong to: 96 % confirmed changes and 4 % no candidate.
 
 ## Method
 
-Both videos were reconstructed in one pass into a shared metric frame with z up and the floor at z = 0. A
-surface counts as removed or added only where the other video looked through the place it occupied, and each
-change keeps the share of its points that were looked through, still seen, hidden or not in view.
+Both videos were reconstructed in one pass into a shared metric frame with z up. A surface counts as removed
+or added only where the other video looked through the place it occupied. Each change keeps the share of its
+points that the other video looked through, saw as a surface, had hidden behind something nearer, or saw in
+fewer than three frames (too few views).

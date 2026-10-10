@@ -56,8 +56,9 @@ def find_other_ends(
     lonely: list[Obj], clouds: tuple[Cloud, Cloud], states, views, images, taken, cfg: Config, device
 ) -> list[tuple[Obj, Obj, Motion]]:
     """For a confirmed removal (or addition) with no partner, look for the same object in the other
-    video. A move whose new place one video skipped otherwise reads as a removal: the brief's
-    "incomplete observations" case.
+    video, at a place the first video saw empty. A move whose new place yields too little free space
+    for a candidate otherwise reads as a removal. Where the first video never looked, appearance alone
+    cannot tell the moved object from an unchanged twin, so such places are not used.
     """
     if not lonely:
         return []
@@ -104,15 +105,15 @@ def find_other_ends(
             inside = np.nonzero(ok & mask[q[:, 1], q[:, 0]] & ~taken[t])[0]
             if len(inside) < cfg.min_cluster_points:
                 continue
-            # The first video must not have seen the object standing there, by the same rule as verdict().
+            # The first video must have looked through the place, by the same rule as verdict().
             st = states[t][body(inside, clouds[t])]
             decided = np.isin(st, (SEEN, FREE)).mean()
-            if decided >= cfg.min_observed and (st == SEEN).mean() >= (1 - cfg.confirm_ratio) * decided:
+            if decided < cfg.min_observed or (st == SEEN).mean() >= (1 - cfg.confirm_ratio) * decided:
                 continue
-            candidates.append((o, Obj(t, inside, inside, {i: mask}), decided))
-    embed([c for _, c, _ in candidates], images, device)
+            candidates.append((o, Obj(t, inside, inside, {i: mask})))
+    embed([c for _, c in candidates], images, device)
     found = []
-    for o, cand, decided in candidates:
+    for o, cand in candidates:
         a, b = (o, cand) if o.side == 0 else (cand, o)
         if (taken[cand.side][cand.idx]).any() or not same_kind(a, b, (clouds[0].xyz, clouds[1].xyz), cfg):
             continue
@@ -120,12 +121,7 @@ def find_other_ends(
         if motion.distance < cfg.min_move:
             continue
         end, other = ("new", "before") if o.side == 0 else ("old", "after")
-        how = (
-            f"was never filmed by the {other} video"
-            if decided < cfg.min_observed
-            else "was found by appearance"
-        )
-        o.reason += f"; its {end} place {how}"
+        o.reason += f"; its {end} place, which the {other} video saw empty, was found by appearance"
         cand.status, cand.shares, cand.reason = o.status, o.shares, o.reason
         taken[cand.side][cand.idx] = True
         found.append((a, b, motion))

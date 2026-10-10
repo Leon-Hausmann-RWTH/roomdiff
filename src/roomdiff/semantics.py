@@ -81,6 +81,8 @@ def crop(image: np.ndarray, mask: np.ndarray | None, box_xyxy: tuple, pad: float
 
 
 def color_name(pixels: np.ndarray) -> str | None:
+    if len(pixels) == 0:
+        return None
     hsv = Image.fromarray(np.asarray(pixels, np.uint8).reshape(-1, 1, 3)).convert("HSV")
     h, s, v = (np.asarray(hsv, np.float32).reshape(-1, 3) / 255).T
     hue = np.array(["red", "orange", "yellow", "green", "blue", "purple", "pink", "red"])
@@ -104,9 +106,6 @@ def color_name(pixels: np.ndarray) -> str | None:
 def label(objects: list[list[np.ndarray]], surfaces: list[list[np.ndarray]], device: torch.device):
     """Best word and its probability per object (from OBJECTS) and per support surface (from SURFACES),
     each averaged over that item's crops. One model load for both."""
-    from transformers.utils import logging
-
-    logging.disable_progress_bar()
     model = AutoModel.from_pretrained(MODEL, revision=REVISION, dtype=torch.float32).to(device).eval()
     processor = AutoProcessor.from_pretrained(MODEL, revision=REVISION)
     out = [

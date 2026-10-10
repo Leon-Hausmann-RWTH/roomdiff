@@ -45,6 +45,8 @@ REPORT = [
 ]  # fmt: skip
 SHOWCASE = ["living_room_17_living_room_18"]
 FLAT = 0.08  # objects lower than this (metres) are below what a depth test can see
+COUNTS = ("pred", "tp", "pred_confirmed", "tp_confirmed", "type_ok", "tp_flat", "fp_unseen",
+          "moves", "moves_placed")  # fmt: skip
 
 
 @dataclass
@@ -103,23 +105,28 @@ def within(a: np.ndarray, b: np.ndarray, r: float = 0.05) -> np.ndarray:
     return cKDTree(b).query(a, distance_upper_bound=r)[0] < r
 
 
-def match(preds: list[Change], objects: list[dict], gt_pts, res: Result) -> list[tuple[int, int]]:
-    """One-to-one: a change matches a GT object if a quarter of its points lie within 5 cm of it."""
-    S = np.zeros((len(preds), len(objects)))
+def match(preds: list[Change], objects: list[dict], gt_pts, res: Result):
+    """One-to-one: a change matches a GT object if a quarter of its points lie within 5 cm of it.
+
+    Returns the matches and the per-end overlaps (2, changes, objects).
+    """
+    S = np.zeros((2, len(preds), len(objects)))
     for i, c in enumerate(preds):
         for j, o in enumerate(objects):
             for s, obj in ((0, c.before), (1, c.after)):
                 if obj is not None and o["id"] in gt_pts[s]:
-                    S[i, j] = max(
-                        S[i, j], float(within(res.clouds[s].xyz[obj.idx], gt_pts[s][o["id"]]).mean())
-                    )
-    rows, cols = linear_sum_assignment(-S) if S.size else ([], [])
-    return [(r, c) for r, c in zip(rows, cols) if S[r, c] >= 0.25]
+                    S[s, i, j] = float(within(res.clouds[s].xyz[obj.idx], gt_pts[s][o["id"]]).mean())
+    best = S.max(0)
+    rows, cols = linear_sum_assignment(-best) if best.size else ([], [])
+    return [(r, c) for r, c in zip(rows, cols) if best[r, c] >= 0.25], S
 
 
 def score(preds: list[Change], objects: list[dict], gt_pts, res: Result) -> dict:
-    m = match(preds, objects, gt_pts, res)
+    m, S = match(preds, objects, gt_pts, res)
     flat = {j for j, o in enumerate(objects) if o["height_m"] < FLAT}
+    moves = [(r, c) for r, c in m if preds[r].kind == objects[c]["type"] == "moved"]
+    # A found move is placed right only if both of its ends lie on the object.
+    placed = [(r, c) for r, c in moves if min(S[0, r, c], S[1, r, c]) >= 0.25]
     return {
         "pred": len(preds),
         "tp": len(m),
@@ -128,6 +135,13 @@ def score(preds: list[Change], objects: list[dict], gt_pts, res: Result) -> dict
         "type_ok": sum(preds[r].kind == objects[c]["type"] for r, c in m),
         "tp_flat": sum(c in flat for _, c in m),
         "matches": [(preds[r].id, objects[c]["id"]) for r, c in m],
+        "moves": len(moves),
+        "moves_placed": len(placed),
+        "move_error_m": [
+            round(abs(preds[r].motion.distance - objects[c]["shift_m"]), 3)
+            for r, c in placed
+            if preds[r].motion is not None and objects[c].get("shift_m") is not None
+        ],
         # A false removal where the other video never looked is the error the evidence rule prevents.
         "fp_unseen": sum(
             bool(np.mean(res.states[s][o.idx] == UNREACHED) > 0.5)
@@ -230,6 +244,10 @@ def evaluate_pair(pair: str, args: Args) -> dict:
         z = np.concatenate([gt_pts[s][oid][:, 2] for s in sides])
         diag = {"id": oid, "label": obj["label"], "type": object_type(obj)}
         diag["height_m"] = round(float(np.percentile(z, 95) - np.percentile(z, 5)), 3)
+        if len(sides) == 2:
+            diag["shift_m"] = round(
+                float(np.linalg.norm(np.subtract(*[np.median(gt_pts[s][oid], 0) for s in (1, 0)]))), 3
+            )
         for s in sides:
             d, j = cKDTree(res.clouds[s].xyz).query(gt_pts[s][oid], distance_upper_bound=0.03)
             hit = d < 0.03
@@ -271,11 +289,9 @@ def control_pair(pair: str, args: Args) -> dict:
 def summary(rows: list[dict]) -> dict:
     gt, flat = sum(r["gt"] for r in rows), sum(r["gt_flat"] for r in rows)
     out = {"pairs": len(rows), "gt_objects": gt, "gt_flat": flat}
+    errors = {who: [e for r in rows for e in r[who]["move_error_m"]] for who in ("ours", "naive")}
     for who in ("ours", "naive"):
-        t = {
-            k: sum(r[who][k] for r in rows)
-            for k in ("pred", "tp", "pred_confirmed", "tp_confirmed", "type_ok", "tp_flat", "fp_unseen")
-        }
+        t = {k: sum(r[who][k] for r in rows) for k in COUNTS}
         out[who] = {
             "recall": round(t["tp"] / max(gt, 1), 3),
             "precision": round(t["tp"] / max(t["pred"], 1), 3),
@@ -285,6 +301,8 @@ def summary(rows: list[dict]) -> dict:
             "recall_flat": round(t["tp_flat"] / max(flat, 1), 3),
             "type_accuracy": round(t["type_ok"] / max(t["tp"], 1), 3),
             "false_in_unseen_regions": t["fp_unseen"],
+            "moves_placed": f"{t['moves_placed']} of {t['moves']}",
+            "median_move_error_m": round(float(np.median(errors[who])), 3) if errors[who] else None,
         }  # fmt: skip
     out["static_false_free"] = round(float(np.mean([x for r in rows for x in r["static_false_free"]])), 4)
     return out

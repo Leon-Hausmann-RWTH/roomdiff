@@ -8,8 +8,9 @@ from .geometry import Views, backproject
 @dataclass
 class Frame:
     T: np.ndarray  # (4, 4) world from reconstruction frame; z up, floor at z = 0
-    floor_found: bool
+    floor_found: bool  # a level plane with the cameras a plausible 0.9 to 2.2 m above it
     camera_height: float  # median camera height above the floor, metres
+    up_from_cameras: bool  # False when the cameras barely turned and gravity came from surface normals
 
 
 def rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -39,7 +40,6 @@ def points_and_normals(views: Views, stride: int = 4) -> tuple[np.ndarray, np.nd
 def up_from_normals(c2w: np.ndarray, nrm: np.ndarray) -> np.ndarray:
     """Up when the cameras barely turned: pitch is a rotation about the mean camera x axis, so search
     that plane for the direction most surface normals share (floors and tables face up)."""
-    print("warning: both videos look in almost one direction; gravity comes from surface normals")
     x = c2w[:, :3, 0].mean(0)
     x /= np.linalg.norm(x)
     u0 = -c2w[:, :3, 1].mean(0)
@@ -61,7 +61,8 @@ def world_frame(views_a: Views, views_b: Views) -> Frame:
     # orthogonal to all of them. Unlike the mean camera y axis, this does not tilt with pitch.
     pts, nrm = (np.concatenate(x) for x in zip(points_and_normals(views_a), points_and_normals(views_b)))
     _, sv, vt = np.linalg.svd(c2w[:, :3, 0], full_matrices=False)
-    up = vt[2] if sv[1] >= 0.15 * sv[0] else up_from_normals(c2w, nrm)
+    turned = bool(sv[1] >= 0.15 * sv[0])
+    up = vt[2] if turned else up_from_normals(c2w, nrm)
     up = up if up @ c2w[:, :3, 1].mean(0) < 0 else -up
     cams = c2w[:, :3, 3]
     floor_found = False
@@ -99,7 +100,9 @@ def world_frame(views_a: Views, views_b: Views) -> Frame:
     xy = np.median(pts @ R.T, 0)
     T[:3, 3] = [-xy[0], -xy[1], -floor_z]
     cam_h = float(np.median(cams @ R[2] - floor_z))
-    return Frame(T=T.astype(np.float32), floor_found=floor_found, camera_height=cam_h)
+    # When a bed or desk fills the view its top can pass for the floor; a phone is held 1 to 2 m up.
+    floor_found = floor_found and 0.9 < cam_h < 2.2
+    return Frame(T=T.astype(np.float32), floor_found=floor_found, camera_height=cam_h, up_from_cameras=turned)
 
 
 def transform(views: Views, T: np.ndarray) -> Views:

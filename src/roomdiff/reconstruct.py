@@ -118,6 +118,7 @@ def reconstruct(path_a: Path, path_b: Path, cfg: Config, required=((), ())) -> R
     cache = cfg.cache_dir / f"recon_{cache_key((path_a, path_b), cfg, required)}.npz"
     if cache.exists():
         z = np.load(cache)
+        print(f"reconstruction: loaded from {cache}")
         return Recon(
             keys, z["depth"], z["conf"].astype(np.float32) / 255, z["c2w"], z["K"], tuple(z["fit_px"])
         )
@@ -138,8 +139,6 @@ def reconstruct(path_a: Path, path_b: Path, cfg: Config, required=((), ())) -> R
     fit_px = (fits[0][1], fits[1][1])
     fit = f"{fit_px[0]:.1f} / {fit_px[1]:.1f} px"
     print(f"reconstruction: {len(conf)} frames on {device.type}, pinhole fit {fit} ({time.time() - t:.0f} s)")
-    if max(fit_px) > 2:
-        print("warning: the predicted rays fit a pinhole camera poorly (a wide-angle lens?)")
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(cache, depth=depth, conf=conf8, c2w=c2w, K=K, fit_px=np.array(fit_px))
     return Recon(keys, depth, conf8.astype(np.float32) / 255, c2w, K, fit_px)

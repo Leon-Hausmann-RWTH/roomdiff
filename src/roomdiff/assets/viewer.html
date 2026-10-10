@@ -68,7 +68,7 @@
   <div id="panel">
     <h1>What changed in the room</h1>
     <p class="sub" id="summary"></p>
-    <p class="sub" id="define">Unverified means not enough evidence either way: the other video saw too little of it, or part of it is still there.</p>
+    <p class="sub" id="define">Unverified means not enough evidence either way: the other video saw too little of it, part of it is still there, or it is too flat to tell from the surface under it.</p>
     <div class="modes" id="modes"></div>
     <div class="hint" id="hint"></div>
     <div class="edit">
@@ -101,10 +101,12 @@ const HINTS = {
   Before: 'Before video in its own colours. Move the slider to apply the detected edits.',
   After: 'After video in its own colours. Boxes without points mark places that are now empty.',
   Overlay: 'Both videos: before in green, after in amber.',
-  Changes: 'Unchanged points in grey, changed objects in the colour of their change.',
+  Changes: 'Unchanged points in grey, changed objects in the colour of their change; the old place of a moved object is pale.',
 };
 const kindOf = c => c.status === 'unverified' ? 'unverified' : c.type;
-const pct = x => Math.round(100 * x) + ' %';
+// Halves round to even as in Python, so the panel prints the same numbers as report.md and the reasons.
+const round = v => { const r = Math.round(v); return r - v === 0.5 && r % 2 ? r - 1 : r; };
+const pct = x => round(100 * x) + ' %';
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
 const $ = id => document.getElementById(id);
 const tagHtml = (k, text) => `<span class="tag" style="background:${STYLE[k][0]}">${STYLE[k][1]}${text === '' ? '' : ' ' + text}</span>`;
@@ -152,19 +154,21 @@ function split(part) {
   return out;
 }
 
-const UNREACHED = [0.95, 0.77, 0.4];
-function paint(p, f, tint) {
+// Points the other video could not check: seen in fewer than three of its frames (per video, as in the top view),
+// or hidden from it behind something nearer.
+const UNCHECKED = { before: [0.42, 0.8, 0.66], after: [0.96, 0.74, 0.3] }, HIDDEN = [0.66, 0.56, 0.92];
+function paint(p, f, tint, side) {
   const src = p.userData.rgb, st = p.userData.st, dst = p.geometry.attributes.color.array;
   for (let i = 0; i < src.length; i += 3) {
     let o = f(src[i], src[i + 1], src[i + 2], 0.3 * src[i] + 0.59 * src[i + 1] + 0.11 * src[i + 2]);
-    // The other video never reached these points, so nothing was checked there.
-    if (tint && st[i / 3] === 3) o = o.map((x, k) => 0.35 * x + 0.65 * UNREACHED[k]);
+    const t = !tint ? null : st[i / 3] === 3 ? UNCHECKED[side] : st[i / 3] === 2 ? HIDDEN : null;
+    if (t) o = o.map((x, k) => 0.35 * x + 0.65 * t[k]);
     dst[i] = o[0]; dst[i + 1] = o[1]; dst[i + 2] = o[2];
   }
   p.geometry.attributes.color.needsUpdate = true;
 }
 const asIs = (r, g, b) => [r, g, b];
-const dim = (r, g, b, l) => { const v = 0.8 + 0.14 * l; return [v, v, v]; };
+const dim = (r, g, b, l) => { const v = 0.62 + 0.26 * l; return [v, v, v]; };
 const shaded = hex => { const c = new THREE.Color(hex); return (r, g, b, l) => [c.r, c.g, c.b].map(x => Math.min(1, x * (0.55 + 0.6 * l))); };
 
 function place(o, b) { o.position.set(...b.center); o.rotation.z = b.yaw; return o; }
@@ -210,18 +214,24 @@ const items = R.changes.map(c => {
   for (const side of SIDES) {
     const b = c['box_' + side];
     if (!b) continue;
-    const g = new THREE.Group(), pts = clouds[side].get(c.id), e = edges(b, color, k === 'unverified'), f = fill(b, color, 0.16);
+    // Unverified edges are darker than their grey tag: dashed grey lines vanish on grey furniture.
+    const g = new THREE.Group(), pts = clouds[side].get(c.id), f = fill(b, color, 0.3);
+    const e = k === 'unverified' ? edges(b, '#3f3f44', true) : edges(b, color, false);
+    const tag = label(`${STYLE[k][1]} ${c.id}`, color, b);
     if (pts) g.add(pts);
-    g.add(e, f, label(`${STYLE[k][1]} ${c.id}`, color, b));
+    g.add(e, f, tag);
     scene.add(g);
-    o[side] = { g, pts, e, f };
+    o[side] = { g, pts, e, f, tag };
   }
   if (c.type === 'moved') {
     const a = new THREE.Vector3(...c.box_before.center), b = new THREE.Vector3(...c.box_after.center);
     const lift = Math.max(c.box_before.size[2], c.box_after.size[2]) / 2 + 0.05;
     a.z += lift; b.z += lift;
     const len = a.distanceTo(b);
-    o.arrow = new THREE.ArrowHelper(b.clone().sub(a).normalize(), a, len, color, Math.min(0.12, len / 3), Math.min(0.07, len / 5));
+    // Darker than the object's points so the head stays visible where it lands on them. Drawn over the scene:
+    // transparent objects come after the (transparent) points, and renderOrder keeps it under the tags.
+    o.arrow = new THREE.ArrowHelper(b.clone().sub(a).normalize(), a, len, 0x8f3f6f, Math.min(0.12, len / 3), Math.min(0.07, len / 5));
+    [o.arrow.line, o.arrow.cone].forEach(m => { m.material.depthTest = false; m.material.transparent = true; m.renderOrder = 9; });
     scene.add(o.arrow);
   }
   return o;
@@ -279,14 +289,14 @@ function repaint(key, tint) {
   painted = key;
   const object = (o, side) => mode === 'Overlay' ? shaded(VIDEO[side]) : mode === 'Changes' ? shaded(o.color) : asIs;
   const stat = side => mode === 'Overlay' ? shaded(VIDEO[side]) : mode === 'Changes' ? dim : asIs;
-  [[statics[0], 'before'], [statics[1], 'after'], [revealed, 'after']].forEach(([p, side]) => p && paint(p, stat(side), tint));
-  items.forEach(o => SIDES.forEach(side => o[side] && o[side].pts && paint(o[side].pts, object(o, side), tint)));
+  [[statics[0], 'before'], [statics[1], 'after'], [revealed, 'after']].forEach(([p, side]) => p && paint(p, stat(side), tint, side));
+  items.forEach(o => SIDES.forEach(side => o[side] && o[side].pts && paint(o[side].pts, object(o, side), tint, side)));
 }
 
 function apply() {
   const tint = $('showUnchecked').checked;
   if (painted !== mode + tint) repaint(mode + tint, tint);
-  const s = edit, ghost = x => 0.2 + 0.8 * x;
+  const s = edit;
   // A thin bar at the foot of the view shows how far the edits are applied, also in recordings of the view.
   $('progress').style.display = mode === 'Before' && s > 0 && s < 1 ? 'block' : 'none';
   $('progress').style.width = 100 * s + '%';
@@ -295,28 +305,31 @@ function apply() {
   fade(revealed, mode === 'Before' ? s : 1);
   items.forEach(o => {
     const t = o.c.type, B = o.before, A = o.after;
-    let pb = 1, eb = 1, pa = 1, ea = 1, show = [true, true];
+    let pb = 1, eb = 1, pa = 1, ea = 1;
     if (mode === 'Before') {
       if (t === 'removed') { pb = 1 - s; eb = Math.max(0.3, 1 - s); }
       if (t === 'added') { pa = s; ea = Math.max(0.3, s); }
-      if (t === 'moved') show = [true, false];
+      // The rigid fit turns an object only about z; over the last quarter it hands over to the after points,
+      // so the end state is the after scene even for an object that also tipped over.
+      if (t === 'moved') { const k = Math.min(1, Math.max(0, (s - 0.75) / 0.25)); pb = eb = 1 - k; pa = ea = k; }
     } else if (mode === 'After') {
       pb = 0;
       eb = t === 'removed' ? 1 : 0.3;
-    } else if (mode === 'Changes') {
-      if (t === 'removed') pb = ghost(1 - s);
-      if (t === 'added') pa = ghost(s);
-      if (t === 'moved') { pa = 0.2; ea = 0.4; }
+    } else if (mode === 'Changes' && t === 'moved') {
+      pb = 0.3; eb = 0.4;
     }
-    if (t === 'moved') moveTo(o, mode === 'Before' || mode === 'Changes' ? s : 0);
-    const focus = !selected || selected === o ? 1 : 0.3;
-    [[B, pb, eb, show[0]], [A, pa, ea, show[1]]].forEach(([part, p, e, vis]) => {
+    if (t === 'moved') moveTo(o, mode === 'Before' ? s : 0);
+    const focus = !selected || selected === o ? 1 : 0.3, sel = selected === o;
+    [[B, pb, eb], [A, pa, ea]].forEach(([part, p, e]) => {
       if (!part) return;
-      part.g.visible = vis;
       fade(part.pts, p);
-      fade(part.e, selected === o ? 1 : e * focus);
-      part.f.visible = selected === o;
+      fade(part.e, sel ? 1 : e * focus);
+      part.f.visible = sel;
+      // The selected change draws over the points in front of it, so a flat object is not buried in its support.
+      [part.e, part.f, part.pts].forEach(m => { if (m) { m.material.depthTest = !sel; m.renderOrder = sel ? 9 : 0; } });
     });
+    // A move gets one tag, like the top view: on the object that travels, or on its new place in the after view.
+    if (t === 'moved') { B.tag.visible = mode !== 'After'; A.tag.visible = mode === 'After'; }
   });
   paths.visible = $('showPaths').checked;
   items.forEach(o => { if (o.ghost) o.ghost.visible = $('showFilm').checked || selected === o; });
@@ -325,7 +338,11 @@ function apply() {
 
 function legend() {
   const kinds = ['removed', 'added', 'moved', 'unverified'].map(k => `<span>${tagHtml(k, '')}${k === 'unverified' ? 'unverified, dashed' : k}</span>`);
-  if ($('showUnchecked').checked) kinds.push('<span><i class="sw" style="background:#f2c466"></i>not checked: seen by one video only</span>');
+  const sw = c => `<i class="sw" style="background:rgb(${c.map(x => Math.round(255 * x)).join(',')})"></i>`;
+  if ($('showUnchecked').checked) {
+    SIDES.forEach(s => kinds.push(`<span>${sw(UNCHECKED[s])}${s} video: too few views from the other</span>`));
+    kinds.push(`<span>${sw(HIDDEN)}hidden from the other video</span>`);
+  }
   if (items.some(o => o.ghost && o.ghost.visible)) kinds.push('<span><i class="sw" style="border:2px solid #55555a"></i>grey camera: where to film next</span>');
   if (mode === 'Overlay' || paths.visible) SIDES.forEach(s => kinds.push(`<span><i class="sw" style="background:${VIDEO[s]}"></i>${s} video</span>`));
   // Rebuilt on every slider step while playing, so touch the DOM only when the content changes.
@@ -350,8 +367,8 @@ function setEdit(s) {
   edit = s;
   $('edit').value = s;
   $('editval').textContent = pct(s);
-  // The slider edits the before scene, so a view of the after video switches to the before video.
-  if (mode === 'After' || mode === 'Overlay') setMode('Before'); else apply();
+  // The slider edits the before scene, so any other view switches to the before video.
+  if (mode !== 'Before') setMode('Before'); else apply();
 }
 $('edit').oninput = e => { playing = false; $('play').innerHTML = '&#9654;'; setEdit(+e.target.value); };
 $('play').onclick = () => {
@@ -393,18 +410,18 @@ $('summary').textContent = n ? `${n} change${n === 1 ? '' : 's'} between ${R.bef
                              : `No changes between ${R.before} and ${R.after}.`;
 $('define').hidden = !C.unverified;
 
-const BAR = [['free', null, 'looked through'], ['seen', '#3a3a3c', 'still seen'], ['occluded', '#b5b3ad', 'hidden'], ['unreached', '#e4e2dd', 'not in view']];
+const BAR = [['free', null, 'looked through'], ['seen', '#3a3a3c', 'surface seen'], ['occluded', '#b5b3ad', 'hidden'], ['unreached', '#e4e2dd', 'too few views']];
 items.forEach(o => {
   const c = o.c, e = c.evidence, cards = DATA.cards[c.id] || {}, div = document.createElement('div');
   div.className = 'item ' + o.k;
   div.innerHTML =
-    `<div>${tagHtml(o.k, c.id)}<b>${esc(c.label)}</b><span class="st">${c.type}, ${c.status}</span></div>` +
+    `<div>${tagHtml(o.k, c.id)}<b>${esc(c.title)}</b><span class="st">${c.type}, ${c.status}</span></div>` +
     `<div class="sent">${esc(c.sentence)}</div><div class="reason">${esc(c.reason)}</div>` +
     (c.check_from ? `<div class="reason">Film again from where the ${c.check_from.video} video stood at ` +
                     `${c.check_from.time_s.toFixed(1)} s (grey camera in the view).</div>` : '') +
     `<div class="bar">${BAR.map(([k, col]) => `<i style="width:${100 * e[k]}%;background:${col || o.color}"></i>`).join('')}</div>` +
     `<div class="barlab">${e.points.toLocaleString('en-US')} points: ` +
-    `${BAR.filter(([k]) => Math.round(100 * e[k])).map(([k, , name]) => `${pct(e[k])} ${name}`).join(', ')}</div>` +
+    `${BAR.filter(([k]) => round(100 * e[k])).map(([k, , name]) => `${pct(e[k])} ${name}`).join(', ')}</div>` +
     `<div class="cards">${SIDES.map(s => `<figure>${cards[s] ? `<img src="${cards[s]}" alt="${s} video">` : `<div class="none">no ${s} view</div>`}` +
                                          `<figcaption>${s}</figcaption></figure>`).join('')}</div>`;
   div.onclick = () => select(o);
@@ -415,7 +432,8 @@ items.forEach(o => {
 $('lightbox').onclick = () => { $('lightbox').style.display = 'none'; };
 const cov = R.coverage;
 $('coverage').textContent = `The other video checked ${pct(cov.checked)} of all surface points and had ${pct(cov.hidden)} hidden; ` +
-                            `${pct(cov.only_before)} were seen only in the before video and ${pct(cov.only_after)} only in the after video ("areas not checked" tints them).`;
+                            `it saw ${pct(cov.unchecked_before)} (before video) and ${pct(cov.unchecked_after)} (after video) in fewer than three frames. ` +
+                            '"areas not checked" tints both kinds.';
 
 const c0 = DATA.center, r0 = DATA.radius;
 controls.target.set(c0[0], c0[1], c0[2] - 0.2);

@@ -44,3 +44,5 @@ ignore = ["B905"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Tests import src directly, so a hidden editable .pth (see README) cannot break them.
+pythonpath = ["src"]

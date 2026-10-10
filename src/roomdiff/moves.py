@@ -10,7 +10,7 @@ from .objects import Obj
 
 @dataclass
 class Motion:
-    yaw: float  # radians about world z
+    yaw: float  # radians about world z, in (-pi, pi]
     t: np.ndarray  # (3,) metres; p_after = Rz(yaw) @ p_before + t
     fit: float  # share of before points within 4 cm of an after point after alignment
     shift: np.ndarray  # (3,) how the object's centre travelled, metres
@@ -49,7 +49,7 @@ def register(src: np.ndarray, dst: np.ndarray, inlier: float = 0.04, steps: int 
             keep = d < max(np.percentile(d, 70), inlier)
             yaw, t = solve_yaw(src[keep], dst[j[keep]])
         d, _ = tree.query(src @ rz(yaw).T + t)
-        results.append((float(np.mean(d < inlier)), yaw % (2 * np.pi), t))
+        results.append((float(np.mean(d < inlier)), float(np.angle(np.exp(1j * yaw))), t))
     fit = max(r[0] for r in results)
     good = [r for r in results if r[0] >= 0.9 * fit]
     # A box fits equally well turned by 180 degrees; report the smallest turn that fits. If good fits
