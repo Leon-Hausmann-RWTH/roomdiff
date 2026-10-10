@@ -1,9 +1,19 @@
 import numpy as np
 import pytest
 
+from roomdiff.changes import candidates
 from roomdiff.config import Config
-from roomdiff.evidence import FREE, OCCLUDED, SEEN, UNREACHED, count_evidence, point_states, self_consistent
-from roomdiff.geometry import Views, cloud_from_views, components
+from roomdiff.evidence import (
+    FREE,
+    OCCLUDED,
+    SEEN,
+    UNREACHED,
+    Evidence,
+    count_evidence,
+    point_states,
+    self_consistent,
+)
+from roomdiff.geometry import Cloud, Views, cloud_from_views, components
 
 # Axis-aligned boxes (min corner, max corner), metres, z up.
 STRUCTURE = {
@@ -147,3 +157,35 @@ def test_components_split_separate_blobs():
     assert len(np.unique(labels[:200])) == 1
     assert len(np.unique(labels[200:])) == 1
     assert labels[0] != labels[200]
+
+
+@pytest.mark.parametrize(
+    "seen, free, occluded, expected",
+    [
+        (5, 0, 0, SEEN),
+        (1, 4, 0, FREE),
+        (3, 2, 0, SEEN),  # below the 60 % share
+        (2, 0, 1, UNREACHED),  # glimpsed twice and hidden once: no verdict, and not "hidden"
+        (0, 0, 3, OCCLUDED),
+        (0, 0, 0, UNREACHED),
+    ],
+)
+def test_point_states(seen, free, occluded, expected):
+    a = lambda x: np.array([x], np.int16)  # noqa: E731
+    ev = Evidence(a(seen), a(free), a(occluded), a(seen + free + occluded), a(1))
+    assert point_states(ev, Config())[0] == expected
+
+
+def test_candidates_need_more_than_one_camera_position():
+    g = np.stack(np.meshgrid(np.arange(0, 0.5, 0.02), np.arange(0, 0.5, 0.02)), -1).reshape(-1, 2)
+    one = np.c_[g, np.full(len(g), 0.5)]  # looked through from a single spot: one burst of bad depth
+    many = np.c_[g[:, 0] + 2, np.full(len(g), 1.0), g[:, 1] + 0.3]  # front face of a removed board
+    xyz = np.concatenate([one, many]).astype(np.float32)
+    n = len(xyz)
+    cloud = Cloud(
+        xyz, np.zeros((n, 3), np.uint8), np.full(n, 2.0, np.float32), np.zeros(n, int), np.ones(n, int)
+    )
+    views = np.r_[np.ones(len(g)), np.full(len(g), 3)].astype(np.int16)
+    z = np.zeros(n, np.int16)
+    found = candidates(cloud, np.full(n, FREE, np.int8), Evidence(z, z + 4, z, z + 4, views), Config())
+    assert len(found) == 1 and found[0].min() >= len(g)

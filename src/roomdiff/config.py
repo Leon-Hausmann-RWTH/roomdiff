@@ -31,10 +31,28 @@ class Config:
     """Share of decisive frames that must look through a point to call it free."""
     cluster_voxel: float = 0.04
     """Voxel size for grouping free points into candidates, metres."""
-    min_cluster_points: int = 30
+    min_cluster_points: int = 20
     """Smallest candidate kept, in 2 cm points."""
-    min_thickness: float = 0.03
-    """Candidates thinner than this (metres, along their flattest axis) are misregistration sheets."""
+    max_depth: float = 6.0
+    """Candidates seen from farther than this (metres) are outside the room: windows, mirrors."""
+    viewpoint_spacing: float = 0.25
+    """Cameras closer than this (metres) count as one viewpoint."""
+    min_multiview: float = 0.3
+    """Share of a candidate's points that cameras in at least two places must have looked through."""
+    max_frame_conflict: float = 0.3
+    """Keyframes whose pixels the rest of their own video looks through more often than this are dropped."""
+    min_observed: float = 0.2
+    """Share of an object's points the other video must decide on; below it the object is unverified."""
+    confirm_ratio: float = 0.5
+    """Share of the decided points that must be free to confirm a change."""
+    partial_ratio: float = 0.2
+    """Share of free points above which a mostly-still-there object counts as partly changed."""
+    match_similarity: float = 0.5
+    """Minimum DINOv2 cosine similarity for a disappeared and an appeared object to be one moved object."""
+    min_fit: float = 0.3
+    """Share of points that must align for the rigid fit of a move to be trusted."""
+    min_move: float = 0.08
+    """A matched pair that moved less than this (metres) and turned less than 15 degrees did not move."""
     device: str = "auto"
     """cuda, mps, cpu or auto (cuda, then mps, then cpu)."""
     cache_dir: Path = Path("cache")

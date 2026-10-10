@@ -111,7 +111,8 @@ def cache_key(paths, cfg: Config, required) -> str:
 
 def reconstruct(path_a: Path, path_b: Path, cfg: Config, required=((), ())) -> Recon:
     t = time.time()
-    w, h = recon_size(probe(path_a)[0], cfg.pixels_per_frame)
+    # One image size for both videos; if one is portrait and the other landscape, meet in the middle.
+    w, h = recon_size(float(np.sqrt(probe(path_a)[0] * probe(path_b)[0])), cfg.pixels_per_frame)
     keys = tuple(select(p, cfg.frames_per_video, (w, h), req) for p, req in zip((path_a, path_b), required))
     print(f"keyframes: {len(keys[0].times)} + {len(keys[1].times)} at {w}x{h} ({time.time() - t:.0f} s)")
     # Only geometry is cached; keyframes are re-decoded, which is deterministic and keeps the cache small.

@@ -42,7 +42,9 @@ def world_frame(views_a: Views, views_b: Views) -> Frame:
     # Handheld phones keep roll near zero, so every camera x axis is horizontal: up is the direction
     # orthogonal to all of them. Unlike the mean camera y axis, this does not tilt with pitch.
     _, sv, vt = np.linalg.svd(c2w[:, :3, 0], full_matrices=False)
-    up = vt[2] if sv[1] > 0.15 * sv[0] else -c2w[:, :3, 1].mean(0)
+    if sv[1] < 0.15 * sv[0]:
+        print("warning: both videos look in almost one direction; gravity comes from the mean camera tilt")
+    up = vt[2] if sv[1] >= 0.15 * sv[0] else -c2w[:, :3, 1].mean(0)
     up = up if up @ c2w[:, :3, 1].mean(0) < 0 else -up
     pts, nrm = (np.concatenate(x) for x in zip(points_and_normals(views_a), points_and_normals(views_b)))
     cams = c2w[:, :3, 3]
@@ -52,7 +54,9 @@ def world_frame(views_a: Views, views_b: Views) -> Frame:
         R = rotation_between(up, np.array([0.0, 0, 1]))
         z, nz, cz = pts @ R[2], nrm @ R[2], cams @ R[2]
         level = np.abs(nz) > 0.9
-        below = level & (z < np.median(cz) - 0.3)
+        # Handheld phones are 1 to 2 m above the floor; level surfaces far lower are reflections or the
+        # view through a window.
+        below = level & (z < np.median(cz) - 0.3) & (z > np.median(cz) - 2.5)
         if below.sum() < 500:
             break
         bins = np.arange(z[below].min(), z[below].max() + 0.02, 0.02)

@@ -3,8 +3,10 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .config import Config
-from .evidence import FREE
-from .geometry import components
+from .evidence import FREE, Evidence
+from .geometry import Cloud, components
+from .moves import Motion
+from .objects import Obj
 
 
 @dataclass
@@ -24,10 +26,11 @@ class Box:
 class Change:
     id: int
     kind: str  # removed, added or moved
-    status: str  # confirmed, partial, unverified or dismissed
+    status: str  # confirmed or unverified
     reason: str
-    before: np.ndarray | None = None  # point indices in the before cloud
-    after: np.ndarray | None = None  # point indices in the after cloud
+    before: Obj | None = None  # the object as the before video saw it
+    after: Obj | None = None
+    motion: Motion | None = None
     label: str = "object"
     sentence: str = ""
     facts: dict = field(default_factory=dict)
@@ -48,21 +51,63 @@ def fit_box(xyz: np.ndarray) -> Box:
     return Box(np.array([*center_xy, (lo[2] + hi[2]) / 2]), size, yaw)
 
 
-def candidates(xyz: np.ndarray, state: np.ndarray, cfg: Config) -> list[np.ndarray]:
+def candidates(cloud: Cloud, state: np.ndarray, ev: Evidence, cfg: Config) -> list[np.ndarray]:
     """Groups of connected free points: places where the other video looked through a surface."""
     free = np.nonzero(state == FREE)[0]
     if len(free) == 0:
         return []
-    labels = components(xyz[free], cfg.cluster_voxel)
+    labels = components(cloud.xyz[free], cfg.cluster_voxel)
     out = []
     for lab in np.unique(labels):
         idx = free[labels == lab]
         if len(idx) < cfg.min_cluster_points:
             continue
-        pts = xyz[idx]
-        # Misregistration leaves thin sheets on floors and walls; real objects have some thickness.
-        thickness = np.sqrt(np.linalg.eigvalsh(np.cov(pts.T))[0]) * 4
-        if thickness < cfg.min_thickness or np.percentile(pts[:, 2], 90) < -0.05:
+        # Keyframes close together see almost the same ray, so one burst of bad depth or pose looks like
+        # many votes; on the tuning pairs most false candidates came from a single camera position.
+        if np.mean(ev.free_views[idx] >= 2) < cfg.min_multiview:
+            continue
+        if np.percentile(cloud.xyz[idx, 2], 90) < -0.05 or np.median(cloud.depth[idx]) > cfg.max_depth:
             continue
         out.append(idx)
     return out
+
+
+def assemble(
+    objs: list[Obj], pairs, before: list[Obj], after: list[Obj], cfg: Config
+) -> tuple[list[Change], list[Obj]]:
+    """Turn verdicts and matches into reported changes; returns them and the objects dismissed on the way."""
+    changes, dismissed, paired = [], [o for o in objs if o.status == "dismissed"], set()
+    for i, j, m in pairs:
+        a, b = before[i], after[j]
+        paired |= {id(a), id(b)}
+        if m.distance < cfg.min_move and (m.turn is None or abs(m.turn) < 15):
+            # The same object in the same place: what looked like change was registration noise.
+            a.reason = b.reason = f"matched itself in the other video, {m.distance * 100:.0f} cm away"
+            dismissed += [a, b]
+            continue
+        # Where an object moved less than its own size, both ends overlap and each is only partly free;
+        # two partial ends plus a rigid fit are as good as one confirmed end.
+        confirmed = "confirmed" in (a.status, b.status) or (
+            a.status == b.status == "partial" and m.fit >= cfg.min_fit
+        )
+        reason = a.reason if a.status == "confirmed" else b.reason
+        changes.append(Change(0, "moved", "confirmed" if confirmed else "unverified", reason, a, b, m))
+    for o in objs:
+        if o.status == "dismissed" or id(o) in paired:
+            continue
+        status = "confirmed" if o.status == "confirmed" else "unverified"
+        changes.append(
+            Change(
+                0,
+                "removed" if o.side == 0 else "added",
+                status,
+                o.reason,
+                *((o, None) if o.side == 0 else (None, o)),
+            )
+        )
+    order = {"moved": 0, "removed": 1, "added": 2}
+    size = lambda c: sum(len(o.idx) for o in (c.before, c.after) if o is not None)  # noqa: E731
+    changes.sort(key=lambda c: (c.status != "confirmed", order[c.kind], -size(c)))
+    for k, c in enumerate(changes):
+        c.id = k + 1
+    return changes, dismissed

@@ -5,10 +5,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .changes import Change, candidates
-from .config import Config
-from .evidence import STATE_NAMES, count_evidence, point_states, self_consistent
+from .changes import Change, assemble, candidates
+from .config import Config, pick_device
+from .evidence import STATE_NAMES, count_evidence, frame_conflicts, point_states, self_consistent
 from .geometry import Cloud, Views, cloud_from_views, subset
+from .moves import match
+from .objects import Obj, describe, lift, merge, segment, verdict
 from .outputs import change_json, write_ply, write_viewer
 from .reconstruct import Recon, reconstruct, to_views
 from .world import Frame, transform, world_frame
@@ -23,6 +25,7 @@ class Result:
     clouds: tuple[Cloud, Cloud]
     states: tuple[np.ndarray, np.ndarray]  # per-point evidence state of each cloud against the other video
     changes: list[Change]
+    dismissed: list[Obj]
 
 
 def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result:
@@ -36,23 +39,43 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
         print("warning: no plausible floor plane; heights and 'on the floor' statements may be wrong")
 
     t = time.time()
+    for own, name in ((va, "before"), (vb, "after")):
+        bad = np.nonzero(frame_conflicts(own, cfg) > cfg.max_frame_conflict)[0]
+        own.depth[bad] = 0
+        if len(bad):
+            print(f"warning: dropped {name} keyframes {bad.tolist()}: the rest of the video contradicts them")
     clouds = []
     for own in (va, vb):
         c = cloud_from_views(own, cfg.voxel)
         clouds.append(subset(c, self_consistent(c.xyz, c.depth, own, cfg)))
     ca, cb = clouds
-    sa = point_states(count_evidence(ca.xyz, ca.depth, vb, cfg), cfg)
-    sb = point_states(count_evidence(cb.xyz, cb.depth, va, cfg), cfg)
+    ea, eb = count_evidence(ca.xyz, ca.depth, vb, cfg), count_evidence(cb.xyz, cb.depth, va, cfg)
+    sa, sb = point_states(ea, cfg), point_states(eb, cfg)
     print(f"ray evidence: {len(ca.xyz)} + {len(cb.xyz)} points ({time.time() - t:.1f} s)")
 
     t = time.time()
-    changes = []
-    for idx in candidates(ca.xyz, sa, cfg):
-        changes.append(Change(len(changes), "removed", "confirmed", "seen through after", before=idx))
-    for idx in candidates(cb.xyz, sb, cfg):
-        changes.append(Change(len(changes), "added", "confirmed", "seen through before", after=idx))
-    print(f"changes: {len(changes)} candidates ({time.time() - t:.1f} s)")
-    return Result((before, after), recon, frame, (va, vb), (ca, cb), (sa, sb), changes)
+    clouds, states, views, evidence = (ca, cb), (sa, sb), (va, vb), (ea, eb)
+    objs = [Obj(s, idx, idx) for s in (0, 1) for idx in candidates(clouds[s], states[s], evidence[s], cfg)]
+    device = pick_device(cfg.device)
+    images = (recon.keys[0].images, recon.keys[1].images)
+    segment(objs, clouds, views, images, device)
+    for o in objs:
+        lift(o, clouds[o.side], views[o.side])
+    objs = merge(objs)
+    for o in objs:
+        verdict(o, clouds[o.side], evidence[o.side], cfg)
+    print(
+        f"objects: {len(objs)} from free-space candidates, segmented with SAM 2.1 ({time.time() - t:.1f} s)"
+    )
+
+    t = time.time()
+    live = [o for o in objs if o.status != "dismissed"]
+    describe(live, images, device)
+    sides = [o for o in live if o.side == 0], [o for o in live if o.side == 1]
+    pairs = match(*sides, (ca.xyz, cb.xyz), cfg)
+    changes, dismissed = assemble(objs, pairs, *sides, cfg)
+    print(f"changes: {len(changes)}, {len(pairs)} matched as moves ({time.time() - t:.1f} s)")
+    return Result((before, after), recon, frame, views, clouds, states, changes, dismissed)
 
 
 def write_outputs(r: Result, out: Path) -> dict:
@@ -60,10 +83,9 @@ def write_outputs(r: Result, out: Path) -> dict:
     (ca, cb), (sa, sb) = r.clouds, r.states
     ids = [np.full(len(ca.xyz), -1, np.int16), np.full(len(cb.xyz), -1, np.int16)]
     for c in r.changes:
-        if c.before is not None:
-            ids[0][c.before] = c.id
-        if c.after is not None:
-            ids[1][c.after] = c.id
+        for side, o in ((0, c.before), (1, c.after)):
+            if o is not None:
+                ids[side][o.idx] = c.id
     shares = {k: np.bincount(s, minlength=4) / len(s) for k, s in (("before", sa), ("after", sb))}
     result = {
         "before": r.paths[0].name,

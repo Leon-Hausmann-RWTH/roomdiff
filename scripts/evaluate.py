@@ -122,9 +122,9 @@ def evaluate_pair(pair: str, args: Args) -> dict:
     S = np.zeros((len(preds), len(objects)))
     for i, c in enumerate(preds):
         for j, o in enumerate(objects):
-            for s, idx, cloud in ((0, c.before, ca), (1, c.after, cb)):
-                if idx is not None and o["id"] in gt_pts[s]:
-                    S[i, j] = max(S[i, j], frac_within(cloud.xyz[idx], gt_pts[s][o["id"]], 0.05))
+            for s, obj, cloud in ((0, c.before, ca), (1, c.after, cb)):
+                if obj is not None and o["id"] in gt_pts[s]:
+                    S[i, j] = max(S[i, j], frac_within(cloud.xyz[obj.idx], gt_pts[s][o["id"]], 0.05))
     rows, cols = linear_sum_assignment(-S) if S.size else ([], [])
     matches = [(r, c) for r, c in zip(rows, cols) if S[r, c] >= 0.25]
     for r, c in matches:
@@ -134,6 +134,8 @@ def evaluate_pair(pair: str, args: Args) -> dict:
         "gt": len(objects),
         "pred": len(preds),
         "tp": len(matches),
+        "pred_confirmed": sum(c.status == "confirmed" for c in preds),
+        "tp_confirmed": sum(preds[r].status == "confirmed" for r, _ in matches),
         "type_ok": sum(preds[r].kind == objects[c]["type"] for r, c in matches),
         "static_false_free": [round(x, 4) for x in static],
         "objects": objects,
@@ -141,6 +143,10 @@ def evaluate_pair(pair: str, args: Args) -> dict:
             {
                 "id": preds[i].id,
                 "type": preds[i].kind,
+                "status": preds[i].status,
+                "points": sum(len(o.idx) for o in (preds[i].before, preds[i].after) if o is not None),
+                "masks": sum(len(o.masks) for o in (preds[i].before, preds[i].after) if o is not None),
+                "reason": preds[i].reason,
                 "best_overlap": round(float(S[i].max()) if S.shape[1] else 0, 2),
             }
             for i in range(len(preds))
@@ -160,9 +166,12 @@ def main(args: Args) -> None:
         rows.append(r)
         print(f"   gt {r['gt']} pred {r['pred']} tp {r['tp']} type ok {r['type_ok']}", flush=True)
     gt, pred, tp = (sum(r[k] for r in rows) for k in ("gt", "pred", "tp"))
+    pred_c, tp_c = (sum(r[k] for r in rows) for k in ("pred_confirmed", "tp_confirmed"))
     total = {
         "recall": round(tp / max(gt, 1), 3),
         "precision": round(tp / max(pred, 1), 3),
+        "recall_confirmed": round(tp_c / max(gt, 1), 3),
+        "precision_confirmed": round(tp_c / max(pred_c, 1), 3),
         "type_accuracy": round(sum(r["type_ok"] for r in rows) / max(tp, 1), 3),
         "static_false_free": round(float(np.mean([x for r in rows for x in r["static_false_free"]])), 4),
     }

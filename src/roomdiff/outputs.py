@@ -20,6 +20,8 @@ def box_json(b: Box | None) -> dict | None:
 
 
 def change_json(c: Change, before: Cloud, after: Cloud) -> dict:
+    m = c.motion
+    obj = c.before if c.before is not None else c.after
     return {
         "id": c.id,
         "type": c.kind,
@@ -27,8 +29,17 @@ def change_json(c: Change, before: Cloud, after: Cloud) -> dict:
         "reason": c.reason,
         "label": c.label,
         "sentence": c.sentence,
-        "box_before": box_json(fit_box(before.xyz[c.before]) if c.before is not None else None),
-        "box_after": box_json(fit_box(after.xyz[c.after]) if c.after is not None else None),
+        "box_before": box_json(fit_box(before.xyz[c.before.idx])) if c.before is not None else None,
+        "box_after": box_json(fit_box(after.xyz[c.after.idx])) if c.after is not None else None,
+        "motion": None
+        if m is None
+        else {
+            "distance_m": round(m.distance, 2),
+            "turn_deg": None if m.turn is None else round(m.turn),
+            "fit": round(m.fit, 2),
+        },
+        "transform": None if m is None else {"yaw": round(m.yaw, 4), "t": np.round(m.t, 4).tolist()},
+        "evidence": obj.shares,
         **c.facts,
     }
 
