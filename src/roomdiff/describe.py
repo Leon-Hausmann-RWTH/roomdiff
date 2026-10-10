@@ -1,6 +1,7 @@
 import numpy as np
 
 from .changes import Change, fit_box
+from .config import Config, pick_device
 from .evidence import SEEN
 from .geometry import Cloud, Views
 from .objects import Obj, best_frames, hires, visible
@@ -24,8 +25,9 @@ def support(o: Obj, cloud: Cloud, state: np.ndarray, taken: np.ndarray, floor_fo
     """What the object stands on: the floor, or the static surface right under its footprint."""
     xyz = cloud.xyz[o.idx]
     bottom = float(np.percentile(xyz[:, 2], 3))
-    if floor_found and bottom < 0.08:
-        return {"name": "floor", "height_m": 0.0, "points": None}
+    if bottom < 0.08:
+        # Near z = 0 only geometry decides: the floor if a floor plane was found, else no name at all.
+        return {"name": "floor" if floor_found else None, "height_m": 0.0, "points": None}
     lo, hi = xyz[:, :2].min(0) - 0.05, xyz[:, :2].max(0) + 0.05
     z = cloud.xyz[:, 2]
     under = (
@@ -64,7 +66,7 @@ def on_phrase(s: dict) -> str:
 
 
 def name_changes(
-    changes: list[Change], clouds, states, views, images, times, floor_found: bool, device
+    changes: list[Change], clouds, states, views, images, times, floor_found: bool, cfg: Config
 ) -> None:
     """Labels and sentences. A VLM never decides what changed; it does not even run here."""
     taken = [np.zeros(len(c.xyz), bool) for c in clouds]
@@ -87,7 +89,7 @@ def name_changes(
             if sc is not None:
                 surfaces.append([sc])
                 slots.append(s)
-    labels, surface_names = label(crops, surfaces, device)
+    labels, surface_names = label(crops, surfaces, pick_device(cfg.device))
     for s, (name, _) in zip(slots, surface_names):
         s["name"] = name
     for c, (word, score) in zip(changes, labels):
@@ -104,13 +106,12 @@ def name_changes(
             end = fit_box(clouds[objs[-1].side].xyz[objs[-1].idx])
             c.facts["floor_blocked_m2"] = round(float(end.size[0] * end.size[1]), 2)
         # A viewpoint helps only where the other video saw too little, not where part is still there.
-        hidden = [o for o in objs if o.status == "unverified"]
-        if c.status == "unverified" and hidden:
-            c.facts["check_from"] = check_from(hidden[0], clouds, views, times)
-        c.sentence = sentence(c, name, hedge)
+        if c.status == "unverified" and c.lead.status == "unverified":
+            c.facts["check_from"] = check_from(c.lead, clouds, views, times)
+        c.sentence = sentence(c, name, hedge, cfg.min_turn)
 
 
-def sentence(c: Change, name: str, hedge: str) -> str:
+def sentence(c: Change, name: str, hedge: str, min_turn: float = 15.0) -> str:
     sup, may = c.facts["support"], c.status == "unverified"
     if c.kind == "moved":
         m, before, after = c.motion, sup["before"], sup["after"]
@@ -127,7 +128,7 @@ def sentence(c: Change, name: str, hedge: str) -> str:
             )
         elif before["name"]:
             text += " across the floor" if before["name"] == "floor" else f" along the {before['name']}"
-        if m.turn is not None and abs(m.turn) >= 15:
+        if m.turn is not None and abs(m.turn) >= min_turn:
             text += f" and turned about {abs(round(m.turn / 5) * 5)} degrees"
     elif c.kind == "removed":
         text = f"The {name} {on_phrase(sup['before'])}{hedge} {'may have been' if may else 'was'} removed"

@@ -29,7 +29,6 @@ def grounded_box(xyz: np.ndarray, support: dict | None) -> dict:
 
 def change_json(c: Change, before: Cloud, after: Cloud) -> dict:
     m = c.motion
-    obj = c.before if c.before is not None else c.after
     support = c.facts.get("support", {})
     return {
         "id": c.id,
@@ -53,7 +52,7 @@ def change_json(c: Change, before: Cloud, after: Cloud) -> dict:
         "height_m": c.facts.get("height_m"),
         "floor_blocked_m2": c.facts.get("floor_blocked_m2"),
         "check_from": c.facts.get("check_from"),
-        "evidence": obj.shares,
+        "evidence": c.lead.shares,
         "cards": {},
     }
 

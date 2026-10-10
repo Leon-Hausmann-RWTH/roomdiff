@@ -24,6 +24,7 @@ class Change:
     reason: str
     before: Obj | None = None  # the object as the before video saw it
     after: Obj | None = None
+    lead: Obj | None = None  # the end whose evidence the reason and the shares describe
     motion: Motion | None = None
     label: str = "object"
     sentence: str = ""
@@ -71,34 +72,31 @@ def assemble(objs: list[Obj], pairs, cfg: Config) -> tuple[list[Change], list[Ob
     changes, dismissed, paired = [], [o for o in objs if o.status == "dismissed"], set()
     for a, b, m in pairs:
         paired |= {id(a), id(b)}
-        if m.distance < cfg.min_move and (m.turn is None or abs(m.turn) < 15):
+        if m.distance < cfg.min_move and (m.turn is None or abs(m.turn) < cfg.min_turn):
             # The same object in the same place: what looked like change was registration noise.
             a.reason = b.reason = f"matched itself in the other video, {m.distance * 100:.0f} cm away"
             dismissed += [a, b]
             continue
+        lead = next(
+            (o for o in (a, b) if o.status == "confirmed"), max((a, b), key=lambda o: o.shares["free"])
+        )
+        status, reason = (
+            ("confirmed", lead.reason) if lead.status == "confirmed" else ("unverified", lead.reason)
+        )
         # Where an object moved less than its own size, both ends overlap and each is only partly free;
         # two partial ends plus a rigid fit are as good as one confirmed end.
-        confirmed = "confirmed" in (a.status, b.status) or (
-            a.status == b.status == "partial" and m.fit >= cfg.min_fit
-        )
-        reason = a.reason if a.status == "confirmed" else b.reason
-        changes.append(Change(0, "moved", "confirmed" if confirmed else "unverified", reason, a, b, m))
+        if a.status == b.status == "partial" and m.fit >= cfg.min_fit:
+            status = "confirmed"
+            reason = f"both ends are partly free and {100 * m.fit:.0f} % of its points align after the move"
+        changes.append(Change(0, "moved", status, reason, a, b, lead, m))
     for o in objs:
         if o.status == "dismissed" or id(o) in paired:
             continue
         status = "confirmed" if o.status == "confirmed" else "unverified"
-        changes.append(
-            Change(
-                0,
-                "removed" if o.side == 0 else "added",
-                status,
-                o.reason,
-                *((o, None) if o.side == 0 else (None, o)),
-            )
-        )
+        ends = (o, None) if o.side == 0 else (None, o)
+        changes.append(Change(0, "removed" if o.side == 0 else "added", status, o.reason, *ends, o))
     order = {"moved": 0, "removed": 1, "added": 2}
-    size = lambda c: sum(len(o.idx) for o in (c.before, c.after) if o is not None)  # noqa: E731
-    changes.sort(key=lambda c: (c.status != "confirmed", order[c.kind], -size(c)))
+    changes.sort(key=lambda c: (c.status != "confirmed", order[c.kind], -c.lead.shares["points"]))
     for k, c in enumerate(changes):
         c.id = k + 1
     return changes, dismissed

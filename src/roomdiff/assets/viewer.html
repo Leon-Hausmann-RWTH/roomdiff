@@ -414,8 +414,8 @@ items.forEach(o => {
 });
 $('lightbox').onclick = () => { $('lightbox').style.display = 'none'; };
 const cov = R.coverage;
-$('coverage').textContent = `The other video checked ${pct(cov.checked)} of all surface points; ${pct(cov.only_before)} were seen ` +
-                            `only in the before video and ${pct(cov.only_after)} only in the after video ("areas not checked" tints them).`;
+$('coverage').textContent = `The other video checked ${pct(cov.checked)} of all surface points and had ${pct(cov.hidden)} hidden; ` +
+                            `${pct(cov.only_before)} were seen only in the before video and ${pct(cov.only_after)} only in the after video ("areas not checked" tints them).`;
 
 const c0 = DATA.center, r0 = DATA.radius;
 controls.target.set(c0[0], c0[1], c0[2] - 0.2);

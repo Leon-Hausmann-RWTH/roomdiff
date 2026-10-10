@@ -1,45 +1,28 @@
 import numpy as np
-import torch
-from PIL import Image
+from scipy.spatial import cKDTree
 
 from .config import Config, free_device
-from .evidence import SEEN
+from .evidence import FREE, SEEN
 from .geometry import Cloud, Views, backproject
-from .moves import Motion, footprint_motion, register
-from .objects import (
-    DINO_REPO,
-    DINO_REVISION,
-    Obj,
-    body,
-    describe,
-    hires,
-    lift,
-    sam_masks,
-    visible,
-)
+from .moves import Motion, fit_move, same_kind
+from .objects import Obj, body, dino, embed, hires, patch_mask, sam_masks, tokens, visible
 
 PATCHES = 64  # DINOv2 patches along the long image side for the dense search
 
 
-def dense_features(images: np.ndarray, device) -> np.ndarray:
-    """(N, rows, cols, 768) unit DINOv2 patch features of whole keyframes."""
-    from transformers import AutoModel
-
-    model = AutoModel.from_pretrained(DINO_REPO, revision=DINO_REVISION).to(device).eval()
-    h, w = images.shape[1:3]
-    rows, cols = (round(PATCHES * h / w), PATCHES) if w >= h else (PATCHES, round(PATCHES * w / h))
-    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
+def dense_features(images: tuple[np.ndarray, np.ndarray], device) -> list[np.ndarray]:
+    """Per video, (N, rows, cols, 768) unit DINOv2 patch features of whole keyframes."""
+    model = dino(device)
     out = []
-    for im in images:
-        x = np.array(Image.fromarray(im).resize((cols * 14, rows * 14)))
-        x = torch.from_numpy(x).to(device).permute(2, 0, 1)[None].float().div(255)
-        with torch.no_grad():
-            tok = model(pixel_values=(x - mean) / std).last_hidden_state[0, 1:]
-        out.append(torch.nn.functional.normalize(tok, dim=-1).view(rows, cols, -1).half().cpu().numpy())
+    for frames in images:
+        h, w = frames.shape[1:3]
+        rows, cols = (round(PATCHES * h / w), PATCHES) if w >= h else (PATCHES, round(PATCHES * w / h))
+        out.append(
+            np.stack([tokens(model, im, (cols * 14, rows * 14)).half().cpu().numpy() for im in frames])
+        )
     del model
     free_device(device)
-    return np.stack(out)
+    return out
 
 
 def patch_points(views: Views, rows: int, cols: int) -> np.ndarray:
@@ -56,13 +39,13 @@ def patch_points(views: Views, rows: int, cols: int) -> np.ndarray:
 
 
 def descriptor(o: Obj, feats: np.ndarray) -> np.ndarray | None:
-    """Mean patch feature inside the object's masks; None if no mask covers a whole patch."""
+    """Mean patch feature inside the object's masks; None if no mask covers most of a patch."""
     rows, cols = feats.shape[1:3]
-    parts = []
-    for i, m in o.masks.items():
-        small = np.asarray(Image.fromarray(m).resize((cols, rows), Image.Resampling.BOX)) > 0.4
-        if small.any():
-            parts.append(feats[i][small].astype(np.float32).mean(0))
+    parts = [
+        feats[i][sel].astype(np.float32).mean(0)
+        for i, m in o.masks.items()
+        if (sel := patch_mask(m, cols, rows, 0.4)).any()
+    ]
     if not parts:
         return None
     f = np.mean(parts, 0)
@@ -73,69 +56,77 @@ def find_other_ends(
     lonely: list[Obj], clouds: tuple[Cloud, Cloud], states, views, images, taken, cfg: Config, device
 ) -> list[tuple[Obj, Obj, Motion]]:
     """For a confirmed removal (or addition) with no partner, look for the same object in the other
-    video at a place the first video never saw. A move whose new place one video skipped otherwise
-    reads as a removal: the brief's "incomplete observations" case.
+    video. A move whose new place one video skipped otherwise reads as a removal: the brief's
+    "incomplete observations" case.
     """
     if not lonely:
         return []
-    feats = [dense_features(images[s], device) for s in (0, 1)]
+    feats = dense_features(images, device)
     pts = [patch_points(views[s], *feats[s].shape[1:3]) for s in (0, 1)]
-    found, prompts, owners = [], {}, {}
+    prompts, owners = {}, {}
     for o in lonely:
         t, d = 1 - o.side, descriptor(o, feats[o.side])
         if d is None:
             continue
-        sim = feats[t].astype(np.float32) @ d  # (N, rows, cols)
-        centre = clouds[o.side].xyz[o.idx].mean(0)
-        far = np.linalg.norm((pts[t] - centre)[..., :2], axis=-1) > 0.4
-        sim = np.where(far & ~np.isnan(pts[t][..., 0]), sim, -1)
+        # Not where the object used to be, and not on anything already explained by another change.
+        owned = np.full(pts[t].shape[:3], np.inf)
+        if taken[t].any():
+            owned = cKDTree(clouds[t].xyz[taken[t]]).query(
+                np.nan_to_num(pts[t], nan=1e6), distance_upper_bound=0.05
+            )[0]
+        far = np.linalg.norm((pts[t] - clouds[o.side].xyz[o.idx].mean(0))[..., :2], axis=-1) > 0.4
+        sim = np.where(far & ~np.isnan(pts[t][..., 0]) & (owned > 0.05), feats[t].astype(np.float32) @ d, -1)
         i, r, c = np.unravel_index(np.argmax(sim), sim.shape)
-        best = pts[t][i, r, c]
         # The same place must look alike from several frames, not one lucky patch.
-        near = np.linalg.norm(pts[t] - best, axis=-1) < 0.15
-        frames = len(np.unique(np.nonzero((sim >= 0.9 * sim[i, r, c]) & near)[0]))
-        if sim[i, r, c] < cfg.search_similarity or frames < 2:
+        near = np.linalg.norm(pts[t] - pts[t][i, r, c], axis=-1) < 0.15
+        if (
+            sim[i, r, c] < cfg.search_similarity
+            or len(np.unique(np.nonzero((sim >= 0.9 * sim[i, r, c]) & near)[0])) < 2
+        ):
             continue
-        rows, cols = sim.shape[1:]
         hh, ww = images[t].shape[1:3]
-        px = np.array([(c + 0.5) * ww / cols, (r + 0.5) * hh / rows])
+        px = np.array([(c + 0.5) * ww / sim.shape[2], (r + 0.5) * hh / sim.shape[1]])
         # Prompt with a box the size the object would have at that depth (keyframes are at 2x focal).
-        size = np.ptp(clouds[o.side].xyz[o.idx], 0).max()
-        z = (np.linalg.inv(views[t].c2w[i])[:3] @ np.append(best, 1))[2]
-        half = 0.35 * size * 2 * views[t].K[i, 0, 0] / max(z, 0.3)
-        corners = np.array([px - half, px + half, px])
-        prompts.setdefault((t, int(i)), []).append(corners)
+        z = (np.linalg.inv(views[t].c2w[i])[:3] @ np.append(pts[t][i, r, c], 1))[2]
+        half = 0.35 * np.ptp(clouds[o.side].xyz[o.idx], 0).max() * 2 * views[t].K[i, 0, 0] / max(z, 0.3)
+        prompts.setdefault((t, int(i)), []).append(np.array([px - half, px + half, px]))
         owners.setdefault((t, int(i)), []).append((o, px))
+    candidates = []
     for (t, i), results in sam_masks(prompts, images, device).items():
         for (o, px), (_, masks, _, _) in zip(owners[(t, i)], results):
             # The smallest of SAM's three masks that holds the matched point: the object, not its shelf.
             hits = [k for k in masks if k[int(px[1]), int(px[0])]]
             if not hits:
                 continue
-            m = min(hits, key=lambda k: k.sum())
-            cloud = clouds[t]
-            u, v, ok = visible(cloud.xyz, views[t], i)
-            q = np.round(hires(u, v)).astype(int).clip([0, 0], [m.shape[1] - 1, m.shape[0] - 1])
-            inside = np.nonzero(ok & m[q[:, 1], q[:, 0]] & ~taken[t])[0]
+            mask = min(hits, key=lambda k: k.sum())
+            u, v, ok = visible(clouds[t].xyz, views[t], i)
+            q = np.round(hires(u, v)).astype(int).clip([0, 0], [mask.shape[1] - 1, mask.shape[0] - 1])
+            inside = np.nonzero(ok & mask[q[:, 1], q[:, 0]] & ~taken[t])[0]
             if len(inside) < cfg.min_cluster_points:
                 continue
-            cand = Obj(t, inside, inside, {i: m})
-            lift(cand, cloud, views[t])
-            # The first video must not have seen the object standing there; then it would not have moved.
-            core = body(cand.idx, cloud)
-            if len(core) == 0 or np.mean(states[t][core] == SEEN) >= 0.5:
+            # The first video must not have seen the object standing there, by the same rule as verdict().
+            st = states[t][body(inside, clouds[t])]
+            decided = np.isin(st, (SEEN, FREE)).mean()
+            if decided >= cfg.min_observed and (st == SEEN).mean() >= (1 - cfg.confirm_ratio) * decided:
                 continue
-            describe([cand], images, device)
-            ha, hb = (np.ptp(clouds[x.side].xyz[x.idx][:, 2]) + 0.02 for x in (o, cand))
-            if cand.feature @ o.feature < cfg.match_similarity or max(ha / hb, hb / ha) >= 2.0:
-                continue
-            a, b = (o, cand) if o.side == 0 else (cand, o)
-            src, dst = clouds[0].xyz[a.idx], clouds[1].xyz[b.idx]
-            m_ = register(src, dst)
-            m_ = m_ if m_.fit >= cfg.min_fit else footprint_motion(src, dst)
-            if m_.distance >= cfg.min_move:
-                cand.status, cand.shares = o.status, o.shares
-                end, other = ("new", "before") if o.side == 0 else ("old", "after")
-                o.reason += f"; its {end} place was never filmed by the {other} video"
-                found.append((a, b, m_))
+            candidates.append((o, Obj(t, inside, inside, {i: mask}), decided))
+    embed([c for _, c, _ in candidates], images, device)
+    found = []
+    for o, cand, decided in candidates:
+        a, b = (o, cand) if o.side == 0 else (cand, o)
+        if (taken[cand.side][cand.idx]).any() or not same_kind(a, b, (clouds[0].xyz, clouds[1].xyz), cfg):
+            continue
+        motion = fit_move(a, b, (clouds[0].xyz, clouds[1].xyz), cfg)
+        if motion.distance < cfg.min_move:
+            continue
+        end, other = ("new", "before") if o.side == 0 else ("old", "after")
+        how = (
+            f"was never filmed by the {other} video"
+            if decided < cfg.min_observed
+            else "was found by appearance"
+        )
+        o.reason += f"; its {end} place {how}"
+        cand.status, cand.shares, cand.reason = o.status, o.shares, o.reason
+        taken[cand.side][cand.idx] = True
+        found.append((a, b, motion))
     return found

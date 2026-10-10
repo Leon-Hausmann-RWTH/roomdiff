@@ -61,7 +61,9 @@ class Config:
     min_fit: float = 0.3
     """Share of points that must align for the rigid fit of a move to be trusted."""
     min_move: float = 0.08
-    """A matched pair that moved less than this (metres) and turned less than 15 degrees did not move."""
+    """A matched pair that moved less than this (metres) and turned less than min_turn did not move."""
+    min_turn: float = 15.0
+    """Smallest turn in degrees that counts as a change and is reported in sentences."""
     device: str = "auto"
     """cuda, mps, cpu or auto (cuda, then mps, then cpu)."""
     cache_dir: Path = Path("cache")

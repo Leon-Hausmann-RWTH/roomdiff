@@ -285,6 +285,9 @@ def write_report(path: Path, result: dict) -> None:
         sections[-1] += "\n".join(f"- {f}" for f in facts if f) + "\n\n" + " ".join(cards) + "\n"
     only = [f"{pct(cov['only_' + v])} only in the {v} video" for v in SIDES if round(100 * cov["only_" + v])]
     one = only and f" The rest was seen by one video only: {join_and(only)}; the top view tints those parts."
+    one = one or ""
+    checked = f"The other video checked {pct(cov['checked'])} of all surface points"
+    checked += f"; {pct(cov['hidden'])} were hidden from it."
     names = ("confirmed changes", "unverified changes", "dismissed candidates", "no candidate")
     keys = ("confirmed", "unverified", "dismissed", "residual")
     ledger = join_and([f"{pct(led[k])} {v}" for k, v in zip(keys, names) if round(100 * led[k])])
@@ -305,7 +308,7 @@ up and the floor at z = 0.
 {body}
 ## Coverage
 
-The other video checked {pct(cov["checked"])} of all surface points.{one}
+{checked}{one}
 
 The points the other video looked through belong to: {ledger}.
 

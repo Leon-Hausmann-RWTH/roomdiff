@@ -69,31 +69,34 @@ def footprint_motion(src: np.ndarray, dst: np.ndarray) -> Motion:
     return Motion(0.0, c1 - c0, 0.0, c1 - c0, None)
 
 
-def match(
-    before: list[Obj], after: list[Obj], xyz: tuple[np.ndarray, np.ndarray], cfg: Config
-) -> list[tuple[int, int, Motion]]:
+def same_kind(a: Obj, b: Obj, xyz: tuple[np.ndarray, np.ndarray], cfg: Config) -> bool:
+    """Could these be one object: similar DINOv2 features and heights within a factor of two."""
+    if a.feature is None or b.feature is None or float(a.feature @ b.feature) < cfg.match_similarity:
+        return False
+    ha, hb = (np.ptp(xyz[o.side][o.idx][:, 2]) + 0.02 for o in (a, b))
+    return max(ha / hb, hb / ha) < 2.0
+
+
+def fit_move(a: Obj, b: Obj, xyz: tuple[np.ndarray, np.ndarray], cfg: Config) -> Motion:
+    src, dst = xyz[0][a.idx], xyz[1][b.idx]
+    m = register(src, dst)
+    return m if m.fit >= cfg.min_fit else footprint_motion(src, dst)
+
+
+def match(before: list[Obj], after: list[Obj], xyz: tuple[np.ndarray, np.ndarray], cfg: Config) -> list:
     """Pair disappeared with appeared objects: same appearance, compatible size, then a rigid fit.
 
     A move is a removal and an addition of the same object (as in SceneDiff, REACT and 3DGS-CD).
+    Returns (before object, after object, Motion) triples.
     """
     if not before or not after:
         return []
     cost = np.full((len(before), len(after)), 9.0)
     for i, a in enumerate(before):
         for j, b in enumerate(after):
-            if a.feature is None or b.feature is None:
-                continue
-            sim = float(a.feature @ b.feature)
-            ha, hb = (np.ptp(xyz[k][o.idx][:, 2]) + 0.02 for k, o in ((0, a), (1, b)))
-            if sim >= cfg.match_similarity and max(ha / hb, hb / ha) < 2.0:
-                cost[i, j] = 1 - sim
-    pairs = []
-    for i, j in zip(*linear_sum_assignment(cost)):
-        if cost[i, j] >= 9:
-            continue
-        src, dst = xyz[0][before[i].idx], xyz[1][after[j].idx]
-        m = register(src, dst)
-        if m.fit < cfg.min_fit:
-            m = footprint_motion(src, dst)
-        pairs.append((before[i], after[j], m))
-    return pairs
+            if same_kind(a, b, xyz, cfg):
+                cost[i, j] = 1 - float(a.feature @ b.feature)
+    pairs = zip(*linear_sum_assignment(cost))
+    return [
+        (before[i], after[j], fit_move(before[i], after[j], xyz, cfg)) for i, j in pairs if cost[i, j] < 9
+    ]

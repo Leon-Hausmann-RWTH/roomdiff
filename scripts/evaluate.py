@@ -18,7 +18,7 @@ import tyro
 from clips import reencode
 from PIL import Image
 from scenediff import load_gt, object_type, rle_decode, rle_encode, videos
-from scipy.ndimage import binary_dilation, binary_erosion
+from scipy.ndimage import binary_erosion
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial import cKDTree
 
@@ -26,7 +26,7 @@ from roomdiff.changes import Change
 from roomdiff.config import Config, pick_device
 from roomdiff.evidence import FREE, SEEN, UNREACHED
 from roomdiff.geometry import backproject, components
-from roomdiff.objects import Obj, choose_mask, hires, sam_masks, visible
+from roomdiff.objects import Obj, choose_mask, hires, sam_masks, splat, visible
 from roomdiff.pipeline import Result, analyse, write_outputs
 from roomdiff.video import probe
 
@@ -189,11 +189,7 @@ def export_official(res: Result, out: Path, device) -> None:
         x0, y0, x1, y1 = keys.crop
         for (c, k), (px, masks, scores, box) in zip(owners[(s, i)], results):
             m = choose_mask(masks, scores, px, box)
-            if m is None:
-                m = np.zeros(masks.shape[1:], bool)
-                q = np.round(px).astype(int).clip([0, 0], [m.shape[1] - 1, m.shape[0] - 1])
-                m[q[:, 1], q[:, 0]] = True
-                m = binary_dilation(m, iterations=4)
+            m = splat(px, masks.shape[1:]) if m is None else m
             full = np.zeros(keys.source_hw, bool)
             full[y0:y1, x0:x1] = np.asarray(
                 Image.fromarray(m).resize((x1 - x0, y1 - y0), Image.Resampling.NEAREST)

@@ -8,10 +8,19 @@ import numpy as np
 from .changes import Change, assemble, candidates
 from .config import Config, pick_device
 from .describe import name_changes
-from .evidence import FREE, UNREACHED, count_evidence, frame_conflicts, point_states, self_consistent
+from .evidence import (
+    FREE,
+    OCCLUDED,
+    SEEN,
+    UNREACHED,
+    count_evidence,
+    frame_conflicts,
+    point_states,
+    self_consistent,
+)
 from .geometry import Cloud, Views, cloud_from_views, subset
 from .moves import match
-from .objects import Obj, describe, lift, merge, segment, verdict
+from .objects import Obj, embed, lift, merge, segment, verdict
 from .outputs import change_json, write_ply
 from .reconstruct import Recon, reconstruct, to_views
 from .report import write_cards, write_floorplan, write_report
@@ -67,14 +76,14 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
         lift(o, clouds[o.side], views[o.side])
     objs = merge(objs)
     for o in objs:
-        verdict(o, clouds[o.side], evidence[o.side], cfg)
+        verdict(o, clouds[o.side], states[o.side], cfg)
     print(
         f"objects: {len(objs)} from free-space candidates, segmented with SAM 2.1 ({time.time() - t:.1f} s)"
     )
 
     t = time.time()
     live = [o for o in objs if o.status != "dismissed"]
-    describe(live, images, device)
+    embed(live, images, device)
     sides = [o for o in live if o.side == 0], [o for o in live if o.side == 1]
     pairs = match(*sides, (ca.xyz, cb.xyz), cfg)
     paired = {id(o) for p in pairs for o in p[:2]}
@@ -85,8 +94,8 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
     found = find_other_ends(lonely, clouds, states, views, images, taken, cfg, device)
     changes, dismissed = assemble(objs, pairs + found, cfg)
     print(
-        f"changes: {len(changes)}, {len(pairs)} matched as moves, {len(found)} found again unfilmed "
-        f"({time.time() - t:.1f} s)"
+        f"changes: {len(changes)}, {len(pairs)} matched as moves, {len(found)} more found in the other "
+        f"video ({time.time() - t:.1f} s)"
     )
     return Result((before, after), recon, frame, views, clouds, states, changes, dismissed)
 
@@ -96,9 +105,10 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     ca, cb = r.clouds
     images = (r.recon.keys[0].images, r.recon.keys[1].images)
-    device = pick_device(cfg.device)
     times = (r.recon.keys[0].times, r.recon.keys[1].times)
-    name_changes(r.changes, r.clouds, r.states, r.views, images, times, r.frame.floor_found, device)
+    name_changes(r.changes, r.clouds, r.states, r.views, images, times, r.frame.floor_found, cfg)
+    print(f"labels: SigLIP 2 names and sentences for {len(r.changes)} changes ({time.time() - t:.1f} s)")
+    t = time.time()
     ids = [np.full(len(ca.xyz), -1, np.int16), np.full(len(cb.xyz), -1, np.int16)]
     for c in r.changes:
         for side, o in ((0, c.before), (1, c.after)):
@@ -132,31 +142,32 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
 
 
 def coverage(states: tuple[np.ndarray, np.ndarray]) -> dict:
-    """Share of all surface points the other video checked, and the shares only one video saw."""
+    """Shares of all surface points: checked by the other video (seen or free), hidden from it, or
+    seen by one video only. Hidden points carry no information either way."""
     total = sum(len(s) for s in states)
-    only = [float((s == UNREACHED).sum()) / total for s in states]
-    return {
-        "checked": round(1 - sum(only), 3),
-        "only_before": round(only[0], 3),
-        "only_after": round(only[1], 3),
+    share = lambda keep: round(float(sum(int(keep(s).sum()) for s in states)) / total, 3)  # noqa: E731
+    out = {"checked": share(lambda s: np.isin(s, (SEEN, FREE))), "hidden": share(lambda s: s == OCCLUDED)}
+    return out | {
+        k: round(float((s == UNREACHED).sum()) / total, 3)
+        for k, s in zip(("only_before", "only_after"), states)
     }
 
 
 def ledger(r: Result) -> dict:
-    """Where the evidence of absence went: every free point is either explained or left over."""
+    """Where the evidence of absence went: every free point is counted once, in this order of buckets."""
     free = [s == FREE for s in r.states]
     total = max(sum(int(f.sum()) for f in free), 1)
-
-    def share(objs) -> float:
+    claimed = [np.zeros(len(f), bool) for f in free]
+    buckets = {
+        "confirmed": [o for c in r.changes if c.status == "confirmed" for o in (c.before, c.after) if o],
+        "unverified": [o for c in r.changes if c.status == "unverified" for o in (c.before, c.after) if o],
+        "dismissed": r.dismissed,
+    }
+    out = {}
+    for name, objs in buckets.items():
         hit = [np.zeros(len(f), bool) for f in free]
         for o in objs:
             hit[o.side][o.idx] = True
-        return round(sum(int((h & f).sum()) for h, f in zip(hit, free)) / total, 3)
-
-    by_status = {
-        k: [o for c in r.changes if c.status == k for o in (c.before, c.after) if o is not None]
-        for k in ("confirmed", "unverified")
-    }
-    out = {k: share(v) for k, v in by_status.items()} | {"dismissed": share(r.dismissed)}
-    out["residual"] = round(1 - sum(out.values()), 3)
-    return out
+        out[name] = round(sum(int((h & f & ~c).sum()) for h, f, c in zip(hit, free, claimed)) / total, 3)
+        claimed = [c | h for c, h in zip(claimed, hit)]
+    return out | {"residual": round(1 - sum(out.values()), 3)}

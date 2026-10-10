@@ -3,10 +3,10 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 from PIL import Image
-from scipy.ndimage import binary_erosion
+from scipy.ndimage import binary_dilation, binary_erosion
 
 from .config import Config, free_device
-from .evidence import FREE, OCCLUDED, SEEN, UNREACHED, Evidence, point_states
+from .evidence import FREE, OCCLUDED, SEEN, UNREACHED
 from .geometry import Cloud, Views, project
 
 SAM_REPO, SAM_REVISION = "facebook/sam2.1-hiera-base-plus", "b7320756a13354e7530a63935656d35b2f91a290"
@@ -100,8 +100,16 @@ def segment(objs: list[Obj], clouds: tuple[Cloud, Cloud], views: tuple[Views, Vi
     for key, results in sam_masks(jobs, images, device).items():
         for o, (px, m, s, box) in zip(owners[key], results):
             pick = choose_mask(m, s, px, box)
-            if pick is not None:
-                o.masks[key[1]] = pick
+            # Without an acceptable SAM mask, the object's own projected points still mark where it is.
+            o.masks[key[1]] = pick if pick is not None else splat(px, m.shape[1:])
+
+
+def splat(px: np.ndarray, hw: tuple[int, int]) -> np.ndarray:
+    """A mask from projected point pixels, closed over the gaps between 2 cm points."""
+    m = np.zeros(hw, bool)
+    q = np.round(px).astype(int).clip([0, 0], [hw[1] - 1, hw[0] - 1])
+    m[q[:, 1], q[:, 0]] = True
+    return binary_dilation(m, iterations=4)
 
 
 def choose_mask(masks: np.ndarray, scores: np.ndarray, px: np.ndarray, box) -> np.ndarray | None:
@@ -168,17 +176,35 @@ def merge(objs: list[Obj]) -> list[Obj]:
     return out
 
 
-def describe(objs: list[Obj], images, device) -> None:
+def dino(device):
+    from transformers import AutoModel
+
+    return AutoModel.from_pretrained(DINO_REPO, revision=DINO_REVISION).to(device).eval()
+
+
+def tokens(model, rgb: np.ndarray, size: tuple[int, int]) -> torch.Tensor:
+    """Unit DINOv2 patch tokens of an RGB image resized to size (multiples of 14): (rows, cols, 768)."""
+    x = torch.from_numpy(np.array(Image.fromarray(rgb).resize(size))).to(model.device).permute(2, 0, 1)[None]
+    mean = torch.tensor([0.485, 0.456, 0.406], device=model.device).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225], device=model.device).view(1, 3, 1, 1)
+    with torch.no_grad():
+        tok = model(pixel_values=(x.float() / 255 - mean) / std).last_hidden_state[0, 1:]
+    return torch.nn.functional.normalize(tok, dim=-1).view(size[1] // 14, size[0] // 14, -1)
+
+
+def patch_mask(mask: np.ndarray, cols: int, rows: int, share: float) -> np.ndarray:
+    # Pillow resizes bool images with nearest neighbour whatever filter is asked for; go through uint8.
+    area = np.asarray(Image.fromarray(mask.astype(np.uint8) * 255).resize((cols, rows), Image.Resampling.BOX))
+    return area > share * 255
+
+
+def embed(objs: list[Obj], images, device) -> None:
     """DINOv2 descriptor per object: patch tokens averaged inside the mask, averaged over views.
 
     DINO features re-identify the same object across views far better than CLIP-style features
-    (SOCO benchmark, 2026); averaging inside the mask follows SceneDiff (Wu et al., ECCV 2026).
+    (SOCO benchmark, 2026); averaging inside the mask follows SceneDiff (Wu et al., arXiv 2512.16908).
     """
-    from transformers import AutoModel
-
-    model = AutoModel.from_pretrained(DINO_REPO, revision=DINO_REVISION).to(device).eval()
-    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
+    model = dino(device)
     for o in objs:
         feats = []
         for i, m in o.masks.items():
@@ -186,13 +212,9 @@ def describe(objs: list[Obj], images, device) -> None:
             pad = 0.1 * max(np.ptp(xs), np.ptp(ys)) + 4
             x0, x1 = int(max(xs.min() - pad, 0)), int(min(xs.max() + pad, m.shape[1] - 1)) + 1
             y0, y1 = int(max(ys.min() - pad, 0)), int(min(ys.max() + pad, m.shape[0] - 1)) + 1
-            crop = np.array(Image.fromarray(images[o.side][i][y0:y1, x0:x1]).resize((224, 224)))
-            small = np.asarray(Image.fromarray(m[y0:y1, x0:x1]).resize((16, 16), Image.Resampling.BOX)) > 0.3
-            x = torch.from_numpy(crop).to(device).permute(2, 0, 1)[None].float().div(255)
-            with torch.no_grad():
-                tokens = model(pixel_values=(x - mean) / std).last_hidden_state[0, 1:]  # (256, 768)
-            sel = torch.from_numpy(small.ravel()).to(device)
-            f = tokens[sel].mean(0) if sel.any() else tokens.mean(0)
+            tok = tokens(model, images[o.side][i][y0:y1, x0:x1], (224, 224))
+            sel = torch.from_numpy(patch_mask(m[y0:y1, x0:x1], 16, 16, 0.3)).to(device)
+            f = tok[sel].mean(0) if sel.any() else tok.reshape(-1, tok.shape[-1]).mean(0)
             feats.append(torch.nn.functional.normalize(f, dim=0).cpu().numpy())
         if feats:
             f = np.mean(feats, 0)
@@ -205,37 +227,34 @@ def body(idx: np.ndarray, cloud: Cloud) -> np.ndarray:
     """The object's points above its contact zone.
 
     The lowest part touches the support, which is still there, and tests as seen up to roughly the
-    depth band times the sine of the viewing angle: up to about 10 cm.
+    depth band times the sine of the viewing angle: up to about 10 cm. Percentiles keep a stray point
+    from setting the zone.
     """
     z = cloud.xyz[idx, 2]
-    contact = min(0.10, max(0.03, 0.3 * float(np.ptp(z))))
-    return idx[z > z.min() + contact] if np.ptp(z) > 0.06 else idx
+    lo, hi = np.percentile(z, [3, 97])
+    keep = idx[z > lo + min(0.10, max(0.03, 0.3 * (hi - lo)))]
+    return keep if hi - lo > 0.06 and len(keep) >= 0.3 * len(idx) else idx
 
 
-def verdict(o: Obj, cloud: Cloud, ev: Evidence, cfg: Config) -> None:
+def verdict(o: Obj, cloud: Cloud, state: np.ndarray, cfg: Config) -> None:
     """Confirmed only where the other video positively saw free space; otherwise say why not."""
-    state = point_states(ev, cfg)[body(o.idx, cloud)]
+    st = state[body(o.idx, cloud)]
     names = (("free", FREE), ("seen", SEEN), ("occluded", OCCLUDED), ("unreached", UNREACHED))
-    o.shares = {k: round(float(np.mean(state == s)), 3) for k, s in names} | {"points": int(len(state))}
+    o.shares = {k: round(float(np.mean(st == s)), 3) for k, s in names} | {"points": int(len(st))}
     decided = o.shares["free"] + o.shares["seen"]
     ratio = o.shares["free"] / max(decided, 1e-9)
     other = "after" if o.side == 0 else "before"
-    pct = lambda x: f"{100 * x:.0f} %"  # noqa: E731
+    looked, saw = f"{100 * ratio:.0f} %", f"{100 * (1 - ratio):.0f} %"
     if decided < cfg.min_observed:
         why = "hidden behind other things" if o.shares["occluded"] > o.shares["unreached"] else "out of view"
-        o.status, o.reason = (
-            "unverified",
-            f"the {other} video could check only {pct(decided)} of it; the rest was {why}",
-        )
+        o.status = "unverified"
+        o.reason = f"the {other} video could check only {100 * decided:.0f} % of it; the rest was {why}"
     elif ratio >= cfg.confirm_ratio:
         o.status, o.reason = (
             "confirmed",
-            f"the {other} video looked through {pct(ratio)} of the points it could check",
+            f"the {other} video looked through {looked} of the points it could check",
         )
     elif ratio >= cfg.partial_ratio:
-        o.status, o.reason = (
-            "partial",
-            f"the {other} video looked through {pct(ratio)} of it; the rest is still there",
-        )
+        o.status, o.reason = "partial", f"the {other} video looked through {looked} of it and still saw {saw}"
     else:
-        o.status, o.reason = "dismissed", f"the {other} video still saw {pct(1 - ratio)} of it"
+        o.status, o.reason = "dismissed", f"the {other} video still saw {saw} of it"
