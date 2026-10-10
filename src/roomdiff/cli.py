@@ -29,3 +29,7 @@ def main() -> None:
 
     write_outputs(analyse(args.before, args.after, args.config), args.out, args.config)
     print(f"wrote {args.out}/")
+
+
+if __name__ == "__main__":
+    main()

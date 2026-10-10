@@ -15,6 +15,7 @@ CARD = (640, 480)
 PLAN = (940, 1320)  # largest plan area in pixels, left of the legend
 HEIGHT_TOP = 1.5  # metres; the floor plan grey saturates here
 GREY = (110, 110, 110)
+Pair = tuple[np.ndarray, np.ndarray]  # one array per video, before then after
 # Pillow bundles this font, so images look the same everywhere; it lacks minus and arrow, hence tag().
 font = ImageFont.load_default
 
@@ -42,7 +43,8 @@ def tag(d: ImageDraw.ImageDraw, x: float, y: float, k: str, text: str, h: int) -
     if k == "added":
         d.line([(cx, cy - r), (cx, cy + r)], fill="white", width=lw)
     if k == "moved":
-        d.polygon([(cx + s * 0.46, cy), (cx + s * 0.1, cy - r * 0.8), (cx + s * 0.1, cy + r * 0.8)], fill="white")
+        a, t = cx + s * 0.1, s * 0.3
+        d.polygon([(cx + s * 0.46, cy), (a, cy - t), (a, cy + t)], fill="white")
     d.text((x + h * 0.95, cy), text, font=f, fill="white", anchor="lm")
     return (x, y, x + w, y + h)
 
@@ -109,12 +111,10 @@ def card(image: np.ndarray, K: np.ndarray, c2w: np.ndarray, box: dict, c: dict, 
 
 
 def write_cards(
-    out_dir: Path,
-    changes: list[dict],
-    objects: dict[int, tuple[np.ndarray | None, np.ndarray | None]],
-    views: tuple[Views, Views],
-    hires: tuple[np.ndarray, np.ndarray],
+    out_dir: Path, changes: list[dict], objects: dict[int, tuple], views: tuple, hires: Pair
 ) -> None:
+    # objects[id] holds the object's world points in each video, None where it is absent; views are
+    # Views at reconstruction resolution and hires the keyframes at a whole multiple of it.
     (out_dir / "cards").mkdir(parents=True, exist_ok=True)
     sharp = []  # per video, (N,) variance of the Laplacian of each keyframe, higher is sharper
     for g in (h[:, ::2, ::2].astype(np.float32).mean(-1) for h in hires):
@@ -133,16 +133,12 @@ def write_cards(
             K[:2] *= hires[s].shape[2] / views[s].depth.shape[2]
             empty = "" if present else ", same place" if c["status"] == "unverified" else ", place empty"
             caption = f"{side} video, frame {views[s].frame_ids[i]}{empty}"
-            card(hires[s][i], K, views[s].c2w[i], box, c, caption).save(out_dir / c["cards"][side], quality=88)
+            out = out_dir / c["cards"][side]
+            card(hires[s][i], K, views[s].c2w[i], box, c, caption).save(out, quality=88)
 
 
 def write_floorplan(
-    path: Path,
-    before: Cloud,
-    after: Cloud,
-    states: tuple[np.ndarray, np.ndarray],
-    result: dict,
-    cameras: tuple[np.ndarray, np.ndarray],
+    path: Path, before: Cloud, after: Cloud, states: Pair, result: dict, cameras: Pair
 ) -> None:
     xyz, state, changes = np.concatenate([before.xyz, after.xyz]), np.concatenate(states), result["changes"]
     paths = [c[:, :2, 3] for c in cameras]  # (N, 2) camera centres on the floor, in keyframe order
@@ -181,15 +177,15 @@ def write_floorplan(
     d = ImageDraw.Draw(img, "RGBA")  # the RGBA mode blends translucent fills into this RGB image
     for side, p in zip(SIDES, paths):
         ring(d, px(p), VIDEO_RGB[side], 3, closed=False)
-    taken, anchors = [], []
+    taken = []
     for c in changes:
         k, col = kind(c), ImageColor.getrgb(COLORS[kind(c)])
         for side in (s for s in SIDES if c[f"box_{s}"]):
-            fp, ghost = px(corners(c[f"box_{side}"])[[0, 1, 3, 2], :2]), c["type"] == "moved" and side == "before"
+            fp = px(corners(c[f"box_{side}"])[[0, 1, 3, 2], :2])
+            ghost = c["type"] == "moved" and side == "before"
             d.polygon([tuple(q) for q in fp], fill=(*col, 40 if ghost or k == "unverified" else 110))
             ring(d, fp, col, 2 if ghost else 4, dash=10 if k == "unverified" else 0)
             taken.append((*fp.min(0), *fp.max(0)))
-        anchors.append(taken[-1])
         if c["type"] == "moved":
             a, b = px(c["box_before"]["center"][:2]), px(c["box_after"]["center"][:2])
             v = (b - a) / max(np.linalg.norm(b - a), 1e-6)
@@ -200,7 +196,9 @@ def write_floorplan(
         if c["check_from"]:
             camera_glyph(d, px(c["check_from"]["position"][:2]), px(c["check_from"]["look_at"][:2]))
     # Tags go on top, at the first corner of their footprint that is clear of footprints and other tags.
-    for c, (x0, y0, x1, y1) in zip(changes, anchors):
+    for c in changes:
+        fp = px(corners(c["box_after"] or c["box_before"])[:, :2])
+        (x0, y0), (x1, y1) = fp.min(0), fp.max(0)
         w = 53 + d.textlength(str(c["id"]), font=font(26))
         spots = [(x1 + 6, y0 - 46), (x0 - w - 6, y0 - 46), (x1 + 6, y1 + 6), (x0 - w - 6, y1 + 6)]
         for x, y in spots:
@@ -225,32 +223,32 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> No
     f = font(26)
     d.text((x, y), "Top view of the changes", font=font(32), fill="black")
     d.text((x, y + 44), f"{result['before']} and {result['after']}", font=font(23), fill=(100, 100, 100))
-    rows = {"moved": "moved, arrow from old to new place", "unverified": "unverified, dashed outline"}
-    rows = [rows.get(k, k) for k in COLORS] + ["where to film next (unverified)", "Not checked"]
-    rows += [f"seen only in the {v} video" for v in SIDES] + ["Context"]
-    rows += [f"structure, darker is higher (0 to {HEIGHT_TOP} m)", "camera paths of both videos", "1 m"]
     y += 104
-    for i, text in enumerate(rows):
-        if text in ("Not checked", "Context"):
-            d.text((x, y + 24), text, font=f, fill="black")
-            y += 70
-            continue
-        if i < len(COLORS):
-            tag(d, x, y, list(COLORS)[i], "", 34)
-        elif text.startswith("where"):
-            camera_glyph(d, np.array([x + 2.0, y + 17]), np.array([x + 54.0, y + 17]))
-        elif text.startswith("seen"):
-            d.rectangle((x, y, x + 48, y + 34), fill=(*VIDEO_RGB[text.split()[4]], 60))
-        elif text.startswith("structure"):
-            for j in range(48):
-                d.line([(x + j, y), (x + j, y + 34)], fill=(int(236 - 116 * j / 47),) * 3)
-        elif text.startswith("camera"):
-            for j, side in enumerate(SIDES):
-                d.line([(x, y + 10 + 14 * j), (x + 48, y + 10 + 14 * j)], fill=VIDEO_RGB[side], width=3)
-        else:
-            d.rectangle((x, y + 12, x + s, y + 22), fill="black")
-        d.text((x + (s + 14 if text == "1 m" else 66), y + 17), text, font=f, fill="black", anchor="lm")
-        y += 50
+
+    def row(text: str, dx: float = 66, dy: int = 50) -> None:
+        nonlocal y
+        d.text((x + dx, y + (17 if dx else 24)), text, font=f, fill="black", anchor="lm" if dx else "la")
+        y += dy
+
+    texts = {"moved": "moved, arrow from old to new place", "unverified": "unverified, dashed outline"}
+    for k in COLORS:
+        tag(d, x, y, k, "", 34)
+        row(texts.get(k, k))
+    camera_glyph(d, np.array([x + 2.0, y + 17]), np.array([x + 54.0, y + 17]))
+    row("where to film next (unverified)")
+    row("Not checked", 0, 70)
+    for side in SIDES:
+        d.rectangle((x, y, x + 48, y + 34), fill=(*VIDEO_RGB[side], 60))
+        row(f"seen only in the {side} video")
+    row("Context", 0, 70)
+    for i in range(48):
+        d.line([(x + i, y), (x + i, y + 34)], fill=(int(236 - 116 * i / 47),) * 3)
+    row(f"structure, darker is higher (0 to {HEIGHT_TOP} m)")
+    for k, side in enumerate(SIDES):
+        d.line([(x, y + 10 + 14 * k), (x + 48, y + 10 + 14 * k)], fill=VIDEO_RGB[side], width=3)
+    row("camera paths of both videos")
+    d.rectangle((x, y + 12, x + s, y + 22), fill="black")
+    row("1 m", s + 14)
 
 
 def pct(x: float) -> str:
@@ -270,26 +268,27 @@ def write_report(path: Path, result: dict) -> None:
     words = {"free": "looked through", "seen": "still seen", "occluded": "hidden", "unreached": "not in view"}
     rows, sections = [], []
     for c in result["changes"]:
-        mo, w, e, blocked, g = c["motion"], c["check_from"], c["evidence"], c["floor_blocked_m2"], GLYPHS[kind(c)]
+        mo, w, e, g = c["motion"], c["check_from"], c["evidence"], GLYPHS[kind(c)]
+        blocked = c["floor_blocked_m2"]
         rows.append(f"| {c['id']} | {g} | {c['type']} | {c['label']} | {c['status']} | {c['sentence']} |")
         turn = f", turned {mo['turn_deg']:.0f} degrees" if mo and mo["turn_deg"] is not None else ""
+        shares = ", ".join(f"{pct(e[k])} {v}" for k, v in words.items() if round(100 * e[k]))
         facts = [
             f"Status: {c['status']} ({c['reason']}).",
             mo and f"Motion: {mo['distance_m']:.2f} m{turn}.",
             blocked and f"Floor now blocked: {blocked:.2f} m².",
             w and f"Film again from where the {w['video']} video stood at {w['time_s']:.1f} s.",
-            f"Evidence: {e['points']:,} points: "
-            + ", ".join(f"{pct(e[k])} {v}" for k, v in words.items() if round(100 * e[k]))
-            + ".",
+            f"Evidence: {e['points']:,} points: {shares}.",
         ]
-        cards = [f'<img src="{c["cards"][s]}" width="49%">' if c["cards"][s] else f"(no {s} view)" for s in SIDES]
-        sections.append(f"## {g} {c['id']}: {c['label']}, {c['type']}\n\n{c['sentence']}\n")
+        cards = [f'<img src="{p}" width="49%">' if p else f"(no {s} view)" for s, p in c["cards"].items()]
+        sections.append(f"## {g} {c['id']}: {c['label']}, {c['type']}\n\n{c['sentence']}\n\n")
         sections[-1] += "\n".join(f"- {f}" for f in facts if f) + "\n\n" + " ".join(cards) + "\n"
-    one = [f"{pct(cov[f'only_{v}'])} only in the {v} video" for v in SIDES if round(100 * cov[f"only_{v}"])]
-    one = f" The rest was seen by one video only: {join_and(one)}; the top view tints those parts." if one else ""
-    names = zip(("confirmed", "unverified", "dismissed", "residual"), ("confirmed changes", "unverified changes"))
-    ledger = [f"{pct(led[k])} {v}" for k, v in names if round(100 * led[k])]
-    table = "\n".join(rows)
+    only = [f"{pct(cov['only_' + v])} only in the {v} video" for v in SIDES if round(100 * cov["only_" + v])]
+    one = only and f" The rest was seen by one video only: {join_and(only)}; the top view tints those parts."
+    names = ("confirmed changes", "unverified changes", "dismissed candidates", "no candidate")
+    keys = ("confirmed", "unverified", "dismissed", "residual")
+    ledger = join_and([f"{pct(led[k])} {v}" for k, v in zip(keys, names) if round(100 * led[k])])
+    table, body = "\n".join(rows), "\n".join(sections)
     path.write_text(f"""# What changed in the room
 
 Between {result["before"]} and {result["after"]} roomdiff found {found}.
@@ -303,12 +302,12 @@ up and the floor at z = 0.
 |---|---|---|---|---|---|
 {table}
 
-{"\n".join(sections)}
+{body}
 ## Coverage
 
 The other video checked {pct(cov["checked"])} of all surface points.{one}
 
-The points the other video looked through belong to: {join_and(ledger)}.
+The points the other video looked through belong to: {ledger}.
 
 ## Method
 
