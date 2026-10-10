@@ -26,5 +26,5 @@ def main() -> None:
             raise SystemExit(f"not a file: {p}")
     from .pipeline import analyse, write_outputs
 
-    write_outputs(analyse(args.before, args.after, args.config), args.out)
+    write_outputs(analyse(args.before, args.after, args.config), args.out, args.config)
     print(f"wrote {args.out}/")

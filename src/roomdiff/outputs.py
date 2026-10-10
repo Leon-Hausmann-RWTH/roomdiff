@@ -1,6 +1,3 @@
-import base64
-import json
-from importlib.resources import files
 from pathlib import Path
 
 import numpy as np
@@ -19,18 +16,31 @@ def box_json(b: Box | None) -> dict | None:
     }
 
 
+def grounded_box(xyz: np.ndarray, support: dict | None) -> dict:
+    # Free evidence stops a few centimetres above the support (the contact zone tests as seen), so a
+    # box fitted to the object's points floats; extend it down to what it stands on.
+    b = fit_box(xyz)
+    bottom, top = b.center[2] - b.size[2] / 2, b.center[2] + b.size[2] / 2
+    if support and support["height_m"] is not None and 0 < bottom - support["height_m"] < 0.15:
+        bottom = support["height_m"]
+    b.center[2], b.size[2] = (bottom + top) / 2, top - bottom
+    return box_json(b)
+
+
 def change_json(c: Change, before: Cloud, after: Cloud) -> dict:
     m = c.motion
     obj = c.before if c.before is not None else c.after
+    support = c.facts.get("support", {})
     return {
         "id": c.id,
         "type": c.kind,
         "status": c.status,
         "reason": c.reason,
         "label": c.label,
+        "label_score": c.facts.get("label_score"),
         "sentence": c.sentence,
-        "box_before": box_json(fit_box(before.xyz[c.before.idx])) if c.before is not None else None,
-        "box_after": box_json(fit_box(after.xyz[c.after.idx])) if c.after is not None else None,
+        "box_before": grounded_box(before.xyz[c.before.idx], support.get("before")) if c.before else None,
+        "box_after": grounded_box(after.xyz[c.after.idx], support.get("after")) if c.after else None,
         "motion": None
         if m is None
         else {
@@ -39,8 +49,10 @@ def change_json(c: Change, before: Cloud, after: Cloud) -> dict:
             "fit": round(m.fit, 2),
         },
         "transform": None if m is None else {"yaw": round(m.yaw, 4), "t": np.round(m.t, 4).tolist()},
+        "support": support,
+        "height_m": c.facts.get("height_m"),
         "evidence": obj.shares,
-        **c.facts,
+        "cards": {},
     }
 
 
@@ -78,29 +90,3 @@ def write_ply(path: Path, before: Cloud, after: Cloud, change_ids: tuple[np.ndar
     with open(path, "wb") as f:
         f.write(header.encode())
         f.write(rec.tobytes())
-
-
-def b64(a: np.ndarray) -> str:
-    return base64.b64encode(np.ascontiguousarray(a).tobytes()).decode()
-
-
-def write_viewer(path: Path, before: Cloud, after: Cloud, data: dict, max_points: int = 200_000) -> None:
-    rng = np.random.default_rng(0)
-    parts = {}
-    for name, c in (("before", before), ("after", after)):
-        keep = np.sort(rng.permutation(len(c.xyz))[:max_points])
-        parts[name] = {"xyz": b64(c.xyz[keep].astype("<f4")), "rgb": b64(c.rgb[keep].astype("u1"))}
-    allxyz = np.concatenate([before.xyz, after.xyz])
-    lo, hi = np.percentile(allxyz, 2, 0), np.percentile(allxyz, 98, 0)
-    payload = {
-        **data,
-        "points": parts,
-        "view_center": ((lo + hi) / 2).tolist(),
-        "view_radius": float(np.linalg.norm(hi - lo)),
-    }
-    assets = files("roomdiff") / "assets"
-    html = (assets / "viewer.html").read_text()
-    html = html.replace("/*THREE*/", (assets / "three.min.js").read_text())
-    html = html.replace("/*ORBIT*/", (assets / "OrbitControls.js").read_text())
-    html = html.replace("/*DATA*/", json.dumps(payload))
-    path.write_text(html)

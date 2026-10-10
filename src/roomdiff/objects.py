@@ -63,43 +63,54 @@ def free_device(device: torch.device) -> None:
         torch.cuda.empty_cache()
 
 
-def segment(objs: list[Obj], clouds: tuple[Cloud, Cloud], views: tuple[Views, Views], images, device) -> None:
-    """SAM 2.1 masks in each object's best views, prompted with the box and centre of its free points."""
+def sam_masks(jobs: dict[tuple[int, int], list[np.ndarray]], images, device) -> dict:
+    """SAM 2.1 for each (side, keyframe): one prompt per pixel set (box around it, point at its centre).
+
+    Returns, per job, a list of (pixels, masks (3, H, W), scores (3,), box) in the order given.
+    """
     from transformers import Sam2Model, Sam2Processor
 
     model = Sam2Model.from_pretrained(SAM_REPO, revision=SAM_REVISION).to(device).eval()
     processor = Sam2Processor.from_pretrained(SAM_REPO, revision=SAM_REVISION)
-    jobs = {}
-    for o in objs:
-        seed_xyz = clouds[o.side].xyz[o.seed]
-        for i in best_frames(seed_xyz, views[o.side]):
-            u, v, ok = visible(seed_xyz, views[o.side], i)
-            jobs.setdefault((o.side, i), []).append((o, hires(u[ok], v[ok])))
-    for (side, i), items in jobs.items():
-        image = images[side][i]
+    out = {}
+    for (side, i), pixel_sets in jobs.items():
         boxes, points = [], []
-        for _, px in items:
+        for px in pixel_sets:
             lo, hi = px.min(0), px.max(0)
             pad = 0.15 * (hi - lo) + 8
             boxes.append([float(x) for x in (*(lo - pad), *(hi + pad))])
             points.append([[float(x) for x in px[np.argmin(np.linalg.norm(px - np.median(px, 0), axis=1))]]])
         inputs = processor(
-            images=image,
+            images=images[side][i],
             input_boxes=[boxes],
             input_points=[points],
-            input_labels=[[[1]] * len(items)],
+            input_labels=[[[1]] * len(pixel_sets)],
             return_tensors="pt",
         ).to(device)
         with torch.no_grad():
-            out = model(**inputs, multimask_output=True)
-        masks = processor.post_process_masks(out.pred_masks.cpu(), inputs["original_sizes"])[0].numpy()
-        scores = out.iou_scores[0].float().cpu().numpy()  # (objects, 3)
-        for (o, px), m, s, box in zip(items, masks, scores, boxes):
-            pick = choose_mask(m.astype(bool), s, px, box)
-            if pick is not None:
-                o.masks[i] = pick
+            res = model(**inputs, multimask_output=True)
+        masks = processor.post_process_masks(res.pred_masks.cpu(), inputs["original_sizes"])[0].numpy()
+        scores = res.iou_scores[0].float().cpu().numpy()  # (prompts, 3)
+        out[(side, i)] = list(zip(pixel_sets, masks.astype(bool), scores, boxes))
     del model
     free_device(device)
+    return out
+
+
+def segment(objs: list[Obj], clouds: tuple[Cloud, Cloud], views: tuple[Views, Views], images, device) -> None:
+    """Masks in each object's best views, prompted with the box and centre of its free points."""
+    owners, jobs = {}, {}
+    for o in objs:
+        seed_xyz = clouds[o.side].xyz[o.seed]
+        for i in best_frames(seed_xyz, views[o.side]):
+            u, v, ok = visible(seed_xyz, views[o.side], i)
+            jobs.setdefault((o.side, i), []).append(hires(u[ok], v[ok]))
+            owners.setdefault((o.side, i), []).append(o)
+    for key, results in sam_masks(jobs, images, device).items():
+        for o, (px, m, s, box) in zip(owners[key], results):
+            pick = choose_mask(m, s, px, box)
+            if pick is not None:
+                o.masks[key[1]] = pick
 
 
 def choose_mask(masks: np.ndarray, scores: np.ndarray, px: np.ndarray, box) -> np.ndarray | None:
