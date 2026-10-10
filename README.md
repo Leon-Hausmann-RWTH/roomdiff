@@ -33,7 +33,7 @@ uv run roomdiff run examples/living_room/before.mp4 examples/living_room/after.m
 open runs/demo/viewer.html   # xdg-open on Linux
 ```
 
-The device is chosen in the order CUDA, Apple Silicon (MPS), CPU. On an M2 Max with 32 GB a pair of 10 s videos takes about 3 minutes (80 s of it the reconstruction) and peaks at 12 GB of GPU memory; on a 16 GB Mac add `--config.frames-per-video 16`. The first run downloads about 10 GB of model weights. CUDA is supported in the code but was not tested (no NVIDIA GPU here); the locked PyTorch 2.14.1 needs NVIDIA driver 580 or newer on Linux, and its Windows wheel runs on the CPU only. The CPU works but is slow: with 8 keyframes per video the reconstruction took 107 s and the labels 53 s.
+The device is chosen in the order CUDA, Apple Silicon (MPS), CPU. On an M2 Max with 32 GB a pair of 12 s videos takes 3 to 4 minutes (75 to 120 s of it the reconstruction; a second run of the pair takes under 1 minute) and peaks at 12 GB of GPU memory; on a 16 GB Mac add `--config.frames-per-video 16`. The first run downloads about 10 GB of model weights. CUDA is supported in the code but was not tested (no NVIDIA GPU here); the locked PyTorch 2.14.1 needs NVIDIA driver 580 or newer on Linux, and its Windows wheel runs on the CPU only. The CPU works but is slow: with 8 keyframes per video the reconstruction took 107 s and the labels 53 s.
 
 If `uv run` stops with `No module named 'roomdiff'` on a Mac, a folder sync has set the hidden flag on the venv's `.pth` files, which Python then skips: `chflags nohidden .venv/lib/python3*/site-packages/*.pth`. Reconstructions are cached in `./cache` (about 28 MB per pair), so a second run of a pair skips Pi3X.
 
