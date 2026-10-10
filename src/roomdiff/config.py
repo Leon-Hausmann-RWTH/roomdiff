@@ -3,6 +3,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+# One printed line per stage; transformers' per-model progress bars and advisories drown them.
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 import torch  # noqa: E402
 

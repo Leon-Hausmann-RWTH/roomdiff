@@ -51,6 +51,8 @@ def change_json(c: Change, before: Cloud, after: Cloud) -> dict:
         "transform": None if m is None else {"yaw": round(m.yaw, 4), "t": np.round(m.t, 4).tolist()},
         "support": support,
         "height_m": c.facts.get("height_m"),
+        "floor_blocked_m2": c.facts.get("floor_blocked_m2"),
+        "check_from": c.facts.get("check_from"),
         "evidence": obj.shares,
         "cards": {},
     }

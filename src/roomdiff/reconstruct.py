@@ -1,6 +1,8 @@
+import contextlib
 import functools
 import gc
 import hashlib
+import io
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,7 +54,8 @@ def load_pi3x(device: torch.device):
     from pi3.models.pi3x import Pi3X
 
     path = hf_hub_download(PI3X_REPO, "model.safetensors", revision=PI3X_REVISION)
-    with torch.device(device):
+    # Pi3 prints a notice about its optional CUDA RoPE kernel; the PyTorch fallback is what runs here.
+    with torch.device(device), contextlib.redirect_stdout(io.StringIO()):
         model = Pi3X(use_multimodal=False)
     names = set(model.state_dict())
     with safe_open(path, "pt", device=str(device)) as f:

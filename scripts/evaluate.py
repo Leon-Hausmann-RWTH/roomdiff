@@ -13,9 +13,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import av
 import numpy as np
 import tyro
+from clips import reencode
 from PIL import Image
 from scenediff import load_gt, object_type, rle_decode, rle_encode, videos
 from scipy.ndimage import binary_dilation, binary_erosion
@@ -252,34 +252,12 @@ def evaluate_pair(pair: str, args: Args) -> dict:
             "static_false_free": static, "objects": objects, "changes": changes}  # fmt: skip
 
 
-def halves(path: Path, out: Path) -> tuple[Path, Path]:
-    """Cut a video at its midpoint into two clips: the same unchanged scene seen along two stretches."""
-    out.mkdir(parents=True, exist_ok=True)
-    frames = []
-    with av.open(str(path)) as src:
-        stream = src.streams.video[0]
-        rate = stream.average_rate
-        for f in src.decode(stream):
-            # Keep the clips small; the pipeline works at about 1000 px anyway.
-            sc = min(1.0, 1280 / max(f.width, f.height))
-            img = f.to_ndarray(
-                width=2 * round(f.width * sc / 2), height=2 * round(f.height * sc / 2), format="rgb24"
-            )
-            frames.append(np.rot90(img, k=round(f.rotation / 90)))
-    paths = (out / "first.mp4", out / "second.mp4")
-    for p, part in zip(paths, (frames[: len(frames) // 2], frames[len(frames) // 2 :])):
-        with av.open(str(p), "w") as dst:
-            s = dst.add_stream("libx264", rate=rate)
-            s.height, s.width = part[0].shape[:2]
-            s.pix_fmt, s.options = "yuv420p", {"crf": "18"}
-            for img in part:
-                dst.mux(s.encode(av.VideoFrame.from_ndarray(np.ascontiguousarray(img), format="rgb24")))
-            dst.mux(s.encode())
-    return paths
-
-
 def control_pair(pair: str, args: Args) -> dict:
-    a, b = halves(videos(pair)[0], args.out / "control" / pair)
+    # The two halves of one video show the same unchanged scene along two stretches of path.
+    src, folder = videos(pair)[0], args.out / "control" / pair
+    a, b = (
+        reencode(src, folder / f"{n}.mp4", part=p) for n, p in (("first", (0, 0.5)), ("second", (0.5, 1)))
+    )
     res = analyse(a, b, args.config)
     if args.write:
         write_outputs(res, args.out / "control" / pair / "out", args.config)

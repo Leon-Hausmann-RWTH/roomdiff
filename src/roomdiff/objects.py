@@ -195,7 +195,7 @@ def describe(objs: list[Obj], images, device) -> None:
             pad = 0.1 * max(np.ptp(xs), np.ptp(ys)) + 4
             x0, x1 = int(max(xs.min() - pad, 0)), int(min(xs.max() + pad, m.shape[1] - 1)) + 1
             y0, y1 = int(max(ys.min() - pad, 0)), int(min(ys.max() + pad, m.shape[0] - 1)) + 1
-            crop = np.asarray(Image.fromarray(images[o.side][i][y0:y1, x0:x1]).resize((224, 224)))
+            crop = np.array(Image.fromarray(images[o.side][i][y0:y1, x0:x1]).resize((224, 224)))
             small = np.asarray(Image.fromarray(m[y0:y1, x0:x1]).resize((16, 16), Image.Resampling.BOX)) > 0.3
             x = torch.from_numpy(crop).to(device).permute(2, 0, 1)[None].float().div(255)
             with torch.no_grad():

@@ -87,7 +87,8 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
     ca, cb = r.clouds
     images = (r.recon.keys[0].images, r.recon.keys[1].images)
     device = pick_device(cfg.device)
-    name_changes(r.changes, r.clouds, r.states, r.views, images, r.frame.floor_found, device)
+    times = (r.recon.keys[0].times, r.recon.keys[1].times)
+    name_changes(r.changes, r.clouds, r.states, r.views, images, times, r.frame.floor_found, device)
     ids = [np.full(len(ca.xyz), -1, np.int16), np.full(len(cb.xyz), -1, np.int16)]
     for c in r.changes:
         for side, o in ((0, c.before), (1, c.after)):

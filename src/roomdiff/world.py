@@ -36,17 +36,33 @@ def points_and_normals(views: Views, stride: int = 4) -> tuple[np.ndarray, np.nd
     return np.concatenate(pts), np.concatenate(nrm)
 
 
+def up_from_normals(c2w: np.ndarray, nrm: np.ndarray) -> np.ndarray:
+    """Up when the cameras barely turned: pitch is a rotation about the mean camera x axis, so search
+    that plane for the direction most surface normals share (floors and tables face up)."""
+    print("warning: both videos look in almost one direction; gravity comes from surface normals")
+    x = c2w[:, :3, 0].mean(0)
+    x /= np.linalg.norm(x)
+    u0 = -c2w[:, :3, 1].mean(0)
+    u0 -= (u0 @ x) * x
+    u0 /= np.linalg.norm(u0)
+    e2 = np.cross(x, u0)
+    n = nrm[np.abs(nrm @ x) < 0.2]
+    n = n * np.sign(n @ u0)[:, None]
+    phi = np.arctan2(n @ e2, n @ u0)
+    hist, edges = np.histogram(phi[np.abs(phi) < np.radians(60)], bins=60)
+    best = (edges[hist.argmax()] + edges[hist.argmax() + 1]) / 2
+    return np.cos(best) * u0 + np.sin(best) * e2
+
+
 def world_frame(views_a: Views, views_b: Views) -> Frame:
     """Gravity from the camera axes, refined by the floor plane; yaw from the dominant wall direction."""
     c2w = np.concatenate([views_a.c2w, views_b.c2w])
     # Handheld phones keep roll near zero, so every camera x axis is horizontal: up is the direction
     # orthogonal to all of them. Unlike the mean camera y axis, this does not tilt with pitch.
-    _, sv, vt = np.linalg.svd(c2w[:, :3, 0], full_matrices=False)
-    if sv[1] < 0.15 * sv[0]:
-        print("warning: both videos look in almost one direction; gravity comes from the mean camera tilt")
-    up = vt[2] if sv[1] >= 0.15 * sv[0] else -c2w[:, :3, 1].mean(0)
-    up = up if up @ c2w[:, :3, 1].mean(0) < 0 else -up
     pts, nrm = (np.concatenate(x) for x in zip(points_and_normals(views_a), points_and_normals(views_b)))
+    _, sv, vt = np.linalg.svd(c2w[:, :3, 0], full_matrices=False)
+    up = vt[2] if sv[1] >= 0.15 * sv[0] else up_from_normals(c2w, nrm)
+    up = up if up @ c2w[:, :3, 1].mean(0) < 0 else -up
     cams = c2w[:, :3, 3]
     floor_found = False
     floor_z = 0.0
