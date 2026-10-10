@@ -52,10 +52,12 @@ OBJECTS = tuple(
     "iron, ironing board, drying rack, hammer, screwdriver, drill, light bulb, fire extinguisher, "
     "bicycle, helmet, scooter, stroller, pet bed, person, cat, dog".split(", ")
 )
+# Raised supports only: whether something stands on the floor is decided by geometry, not by a model.
 SURFACES = tuple(
-    "floor, rug, table, coffee table, dining table, side table, desk, sofa, armchair, bed, chair, "  # noqa: SIM905
-    "stool, ottoman, bench, shelf, bookshelf, cabinet, dresser, nightstand, counter, windowsill, tv "
-    "stand, radiator, stairs".split(", ")
+    "table, coffee table, dining table, side table, desk, sofa, armchair, bed, chair, stool, ottoman, "  # noqa: SIM905
+    "bench, shelf, bookshelf, cabinet, dresser, nightstand, counter, windowsill, tv stand, radiator".split(
+        ", "
+    )
 )
 
 
@@ -86,23 +88,43 @@ def color_name(pixels: np.ndarray) -> str | None:
     # Thresholds fitted on 33 SceneDiff objects; in phone footage white surfaces sit at V = 0.6 to 0.9.
     warm = (name == "orange") | (name == "yellow")
     name[warm & (v < 0.6)] = "brown"
-    name[warm & (s < 0.35) & (v >= 0.6)] = "beige"
+    beige = warm & (s >= 0.08) & (s < 0.35) & (v > 0.45)
+    name[beige] = "beige"
     name[(name == "red") & (s < 0.6) & (v > 0.7)] = "pink"
-    name[s < 0.2] = np.where(v[s < 0.2] > 0.65, "white", "grey")
+    # A warm, faintly saturated surface is beige even in shade; only the rest of the low-saturation
+    # pixels are white or grey.
+    plain = (s < 0.2) & ~beige
+    name[plain] = np.where(v[plain] > 0.65, "white", "grey")
     name[(v < 0.15) | ((v < 0.3) & (s < 0.4))] = "black"
     words, counts = np.unique(name, return_counts=True)
     k = counts.argmax()
     return str(words[k]) if counts[k] >= COLOR_SHARE * len(name) else None
 
 
-def label_objects(
-    crops: list[list[np.ndarray]], device: torch.device, vocabulary=OBJECTS
-) -> list[tuple[str, float]]:
-    """Best word of vocabulary per object and its probability, averaged over the object's crops."""
-    if not crops:
-        return []
+def label(objects: list[list[np.ndarray]], surfaces: list[list[np.ndarray]], device: torch.device):
+    """Best word and its probability per object (from OBJECTS) and per support surface (from SURFACES),
+    each averaged over that item's crops. One model load for both."""
+    from transformers.utils import logging
+
+    logging.disable_progress_bar()
     model = AutoModel.from_pretrained(MODEL, revision=REVISION, dtype=torch.float32).to(device).eval()
     processor = AutoProcessor.from_pretrained(MODEL, revision=REVISION)
+    out = [
+        classify(model, processor, crops, vocabulary, device)
+        for crops, vocabulary in ((objects, OBJECTS), (surfaces, SURFACES))
+    ]
+    del model
+    gc.collect()
+    if device.type == "mps":
+        torch.mps.empty_cache()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    return out
+
+
+def classify(model, processor, crops: list[list[np.ndarray]], vocabulary, device) -> list[tuple[str, float]]:
+    if not crops:
+        return []
     # SigLIP was trained on lowercase text padded to 64 tokens.
     prompts = [t.format(w).lower() for w in vocabulary for t in TEMPLATES]
     images = [Image.fromarray(c) for views in crops for c in views]
@@ -133,12 +155,6 @@ def label_objects(
         # between objects; the bias cancels.
         logits = model.logit_scale.exp() * F.normalize(image, dim=-1) @ text.T  # (views, vocabulary)
         probs = logits.softmax(-1).cpu().numpy()
-    del model, text, image, logits
-    gc.collect()
-    if device.type == "mps":
-        torch.mps.empty_cache()
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
     out, start = [], 0
     for views in crops:
         # Averaging per-view probabilities beat averaging embeddings in 35 of 71 model and crop pairs,
@@ -147,7 +163,3 @@ def label_objects(
         start += len(views)
         out.append((vocabulary[int(p.argmax())], float(p.max())))
     return out
-
-
-def name_surfaces(crops: list[list[np.ndarray]], device: torch.device) -> list[tuple[str, float]]:
-    return label_objects(crops, device, SURFACES)

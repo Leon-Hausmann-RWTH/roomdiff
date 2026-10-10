@@ -7,12 +7,12 @@ import numpy as np
 
 from .changes import Change, assemble, candidates
 from .config import Config, pick_device
-from .describe import name_changes, unchecked
+from .describe import name_changes
 from .evidence import FREE, UNREACHED, count_evidence, frame_conflicts, point_states, self_consistent
 from .geometry import Cloud, Views, cloud_from_views, subset
 from .moves import match
 from .objects import Obj, describe, lift, merge, segment, verdict
-from .outputs import box_json, change_json, write_ply
+from .outputs import change_json, write_ply
 from .reconstruct import Recon, reconstruct, to_views
 from .report import write_cards, write_floorplan, write_report
 from .search import find_other_ends
@@ -104,24 +104,15 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
         for side, o in ((0, c.before), (1, c.after)):
             if o is not None:
                 ids[side][o.idx] = c.id
-    unchecked_areas = [
-        a for side in (0, 1) for a in unchecked(r.clouds[side], r.states[side], side, ids[side] >= 0)
-    ]
     changes = [change_json(c, ca, cb) for c in r.changes]
     result = {
         "before": r.paths[0].name,
         "after": r.paths[1].name,
         "units": "metres, z up, floor at z = 0",
         "camera_height_m": round(r.frame.camera_height, 2),
-        "counts": {
-            k: sum(c.kind == k and c.status == "confirmed" for c in r.changes)
-            for k in ("moved", "added", "removed")
-        }
+        "counts": {k: sum(c.kind == k for c in r.changes) for k in ("moved", "added", "removed")}
         | {"unverified": sum(c.status == "unverified" for c in r.changes)},
         "changes": changes,
-        "unchecked": [
-            {"id": f"U{k + 1}", **a, "box": box_json(a["box"])} for k, a in enumerate(unchecked_areas)
-        ],
         "coverage": coverage(r.states),
         "ledger": ledger(r),
     }
@@ -135,7 +126,7 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
     cameras = (r.views[0].c2w, r.views[1].c2w)
     write_floorplan(out / "floorplan.png", ca, cb, r.states, result, cameras)
     write_report(out / "report.md", result)
-    write_viewer(out / "viewer.html", ca, cb, ids, result, out / "cards", cameras)
+    write_viewer(out / "viewer.html", ca, cb, ids, r.states, result, out / "cards", cameras)
     print(f"outputs: {len(changes)} changes written to {out} ({time.time() - t:.1f} s)")
     return result
 

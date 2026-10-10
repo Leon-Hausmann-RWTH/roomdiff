@@ -1,10 +1,10 @@
 import numpy as np
 
-from .changes import Box, Change, components, fit_box
-from .evidence import SEEN, UNREACHED
+from .changes import Change, fit_box
+from .evidence import SEEN
 from .geometry import Cloud, Views
 from .objects import Obj, best_frames, hires, visible
-from .semantics import color_name, crop, label_objects, name_surfaces
+from .semantics import color_name, crop, label
 
 
 def mask_box(m: np.ndarray) -> tuple[int, int, int, int]:
@@ -52,15 +52,8 @@ def surface_crop(o: Obj, pts: np.ndarray, cloud: Cloud, views: Views, images) ->
     return crop(images[o.side][i], None, (int(lo[0]), int(lo[1]), int(hi[0]) + 1, int(hi[1]) + 1), pad=0.1)
 
 
-def direction(d: np.ndarray, views: Views) -> str:
-    # Words relative to the first frame of the before video, the view a person replaying it starts with.
-    right = views.c2w[0, :3, 0]
-    fwd = views.c2w[0, :3, 2]
-    right, fwd = right[:2] / np.linalg.norm(right[:2]), fwd[:2] / np.linalg.norm(fwd[:2])
-    x, y = float(d[:2] @ right), float(d[:2] @ fwd)
-    if abs(x) >= abs(y):
-        return "to the right" if x > 0 else "to the left"
-    return "away from the camera" if y > 0 else "toward the camera"
+def article(word: str) -> str:
+    return f"an {word}" if word[0] in "aeiou" else f"a {word}"
 
 
 def on_phrase(s: dict) -> str:
@@ -82,64 +75,68 @@ def name_changes(
     crops, surfaces, slots = [], [], []
     for c in changes:
         objs = [o for o in (c.before, c.after) if o is not None]
-        crops.append([x for o in objs for x in object_crops(o, images)][:6])
+        crops.append(
+            [x for o in objs for x in object_crops(o, images)][:6] or [np.zeros((32, 32, 3), np.uint8)]
+        )
         c.facts["support"] = {}
         for o in objs:
             s = support(o, clouds[o.side], states[o.side], taken[o.side], floor_found)
             pts = s.pop("points")
             c.facts["support"]["before" if o.side == 0 else "after"] = s
-            if pts is not None:
-                sc = surface_crop(o, pts, clouds[o.side], views[o.side], images)
-                if sc is not None:
-                    surfaces.append([sc])
-                    slots.append(s)
-    labels = label_objects([x if x else [np.zeros((32, 32, 3), np.uint8)] for x in crops], device)
-    for s, (name, _) in zip(slots, name_surfaces(surfaces, device) if surfaces else []):
+            sc = None if pts is None else surface_crop(o, pts, clouds[o.side], views[o.side], images)
+            if sc is not None:
+                surfaces.append([sc])
+                slots.append(s)
+    labels, surface_names = label(crops, surfaces, device)
+    for s, (name, _) in zip(slots, surface_names):
         s["name"] = name
-    for c, (label, score), objs in zip(
-        changes, labels, ([o for o in (c.before, c.after) if o] for c in changes)
-    ):
-        c.label, c.facts["label_score"] = label, round(float(score), 3)
+    for c, (word, score) in zip(changes, labels):
+        objs = [o for o in (c.before, c.after) if o is not None]
+        c.label, c.facts["label_score"] = word, round(float(score), 3)
         colour = color_name(np.concatenate([object_pixels(o, images) for o in objs]))
-        name = f"{colour} {label}" if colour else label
-        if score < 0.25:
-            # Objects SigLIP scored under 0.25 were often misnamed on the SceneDiff check; say so.
-            name = f"object (possibly a {label})"
-        box = fit_box(clouds[objs[0].side].xyz[objs[0].idx])
-        c.facts["height_m"] = round(float(box.size[2]), 2)
-        last = objs[-1]
+        # On 80 SceneDiff objects SigLIP was right for 95 % of names scored 0.5 or more and often wrong
+        # under 0.35; say so instead of naming confidently.
+        name = "object" if score < 0.35 else f"{colour} {word}" if colour else word
+        hedge = f", possibly {article(word)}," if score < 0.35 else ""
+        c.facts["height_m"] = round(float(fit_box(clouds[objs[0].side].xyz[objs[0].idx]).size[2]), 2)
         if c.kind != "removed" and c.facts["support"].get("after", {}).get("name") == "floor":
             # For a robot the question is what is now in the way.
-            end = fit_box(clouds[last.side].xyz[last.idx])
+            end = fit_box(clouds[objs[-1].side].xyz[objs[-1].idx])
             c.facts["floor_blocked_m2"] = round(float(end.size[0] * end.size[1]), 2)
-        if c.status == "unverified":
-            c.facts["check_from"] = check_from(objs[0], clouds, views, times)
-        c.sentence = sentence(c, name, views[0])
+        # A viewpoint helps only where the other video saw too little, not where part is still there.
+        hidden = [o for o in objs if o.status == "unverified"]
+        if c.status == "unverified" and hidden:
+            c.facts["check_from"] = check_from(hidden[0], clouds, views, times)
+        c.sentence = sentence(c, name, hedge)
 
 
-def sentence(c: Change, name: str, first_view: Views) -> str:
-    sup = c.facts["support"]
+def sentence(c: Change, name: str, hedge: str) -> str:
+    sup, may = c.facts["support"], c.status == "unverified"
     if c.kind == "moved":
-        m = c.motion
-        text = f"The {name} moved {m.distance:.1f} m {direction(m.shift, first_view)}"
-        before, after = sup.get("before"), sup.get("after")
-        if before and after and before["name"] != after["name"]:
+        m, before, after = c.motion, sup["before"], sup["after"]
+        text = f"The {name}{hedge} {'may have moved' if may else 'moved'} {m.distance:.1f} m"
+        # Two names for surfaces at one height are usually one piece of furniture named twice.
+        if abs(before["height_m"] - after["height_m"]) < 0.05 and "floor" not in (
+            before["name"],
+            after["name"],
+        ):
+            after = before
+        if before["name"] != after["name"]:
             text += (
-                f", from {on_phrase(before).removeprefix('on ')} onto {on_phrase(after).removeprefix('on ')}"
+                f" from {on_phrase(before).removeprefix('on ')} onto {on_phrase(after).removeprefix('on ')}"
             )
+        elif before["name"]:
+            text += " across the floor" if before["name"] == "floor" else f" along the {before['name']}"
         if m.turn is not None and abs(m.turn) >= 15:
-            text += f", and turned about {abs(round(m.turn / 5) * 5)} degrees"
-        text += "."
+            text += f" and turned about {abs(round(m.turn / 5) * 5)} degrees"
     elif c.kind == "removed":
-        text = f"The {name} {on_phrase(sup['before'])} was removed."
+        text = f"The {name} {on_phrase(sup['before'])}{hedge} {'may have been' if may else 'was'} removed"
     else:
-        text = f"A {name} appeared {on_phrase(sup['after'])}."
+        verb = "may have appeared" if may else "appeared"
+        text = f"{article(name).capitalize()}{hedge} {verb} {on_phrase(sup['after'])}"
     if c.facts.get("floor_blocked_m2", 0) >= 0.05:
-        text = text[:-1] + f", blocking {c.facts['floor_blocked_m2']:.2f} m² of floor."
-    if c.status == "unverified":
-        # The reason and the viewpoint that would settle it travel as their own fields.
-        text = f"Possibly: {text[0].lower()}{text[1:]}"
-    return text
+        text += f", blocking {c.facts['floor_blocked_m2']:.2f} m² of floor"
+    return text + "."
 
 
 def check_from(o: Obj, clouds, views, times) -> dict:
@@ -155,34 +152,3 @@ def check_from(o: Obj, clouds, views, times) -> dict:
         "position": np.round(pose[:3, 3], 3).tolist(),
         "look_at": np.round(clouds[o.side].xyz[o.idx].mean(0), 3).tolist(),
     }
-
-
-def unchecked(cloud: Cloud, state: np.ndarray, side: int, taken: np.ndarray) -> list[dict]:
-    """Object-sized regions one video saw and the other never looked at: no claim either way."""
-    keep = np.nonzero((state == UNREACHED) & ~taken & (cloud.xyz[:, 2] > 0.05) & (cloud.xyz[:, 2] < 2.2))[0]
-    if len(keep) < 200:
-        return []
-    labels = components(cloud.xyz[keep], 0.08)
-    areas = []
-    for lab in np.unique(labels):
-        idx = keep[labels == lab]
-        if len(idx) < 200:
-            continue
-        box = fit_box(cloud.xyz[idx])
-        # Object-sized only: long strips of wall or floor the other video skipped are coverage, which
-        # the floor plan shows as a tint, not a place where something may hide.
-        if not 0.3 <= box.size[:2].max() <= 1.5 or box.size.min() < 0.04:
-            continue
-        areas.append((len(idx), box))
-    areas.sort(key=lambda a: -a[0])
-    other = "after" if side == 0 else "before"
-    return [
-        {"video": "before" if side == 0 else "after", "box": b, "sentence": unchecked_sentence(b, other)}
-        for _, b in areas[:2]
-    ]
-
-
-def unchecked_sentence(b: Box, other: str) -> str:
-    w, d = sorted(b.size[:2])[::-1]
-    top = b.center[2] + b.size[2] / 2
-    return f"The {other} video never looked at a region {w:.1f} m by {d:.1f} m, up to {top:.1f} m high."

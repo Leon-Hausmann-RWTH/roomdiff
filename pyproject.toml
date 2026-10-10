@@ -7,7 +7,7 @@ requires-python = ">=3.11,<3.14"
 dependencies = [
     "av>=14",
     "huggingface-hub>=0.30",
-    "numpy>=1.26",
+    "numpy>=2.0",
     "pi3",
     "pillow>=10",
     "safetensors>=0.4",

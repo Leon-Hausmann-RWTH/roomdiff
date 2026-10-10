@@ -31,6 +31,8 @@ class Args:
     before: tyro.conf.Positional[Path]
     after: tyro.conf.Positional[Path]
     name: str = "living_room"
+    docs: bool = True
+    """Also rebuild docs/index.html and the README media from this example."""
 
 
 def slider_gif(viewer: Path, path: Path, frames: int = 48) -> None:
@@ -80,6 +82,8 @@ def main(args: Args) -> None:
     after = reencode(args.after, root / "after.mp4")
     output = root / "output"
     write_outputs(analyse(before, after, Config()), output, Config())
+    if not args.docs:
+        return
     media = Path("docs/media")
     media.mkdir(parents=True, exist_ok=True)
     shutil.copy(output / "viewer.html", "docs/index.html")

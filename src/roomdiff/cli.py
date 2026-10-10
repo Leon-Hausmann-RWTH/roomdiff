@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Annotated
 
 import tyro
 
@@ -10,9 +11,9 @@ from .config import Config
 class Run:
     """Compare two videos of the same room and report what was moved, added or removed."""
 
-    before: tyro.conf.Positional[Path]
+    before: Annotated[Path, tyro.conf.Positional, tyro.conf.arg(metavar="BEFORE")]
     """Video recorded before the changes (.mp4, .mov)."""
-    after: tyro.conf.Positional[Path]
+    after: Annotated[Path, tyro.conf.Positional, tyro.conf.arg(metavar="AFTER")]
     """Video recorded after the changes."""
     out: Path = Path("runs/latest")
     """Output folder for changes.json, viewer.html, floorplan.png, report.md and scene.ply."""

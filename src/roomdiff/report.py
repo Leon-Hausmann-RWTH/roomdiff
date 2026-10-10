@@ -15,6 +15,15 @@ CARD = (640, 480)
 PLAN = (940, 1320)  # largest plan area in pixels, left of the legend
 HEIGHT_TOP = 1.5  # metres; the floor plan grey saturates here
 GREY = (110, 110, 110)
+UNVERIFIED = (
+    "not enough evidence either way: the other video saw too little of it, or part of it is still there"
+)
+STATE_WORDS = {
+    "free": "looked through",
+    "seen": "still seen",
+    "occluded": "hidden",
+    "unreached": "not in view",
+}
 
 
 def kind(change: dict) -> str:
@@ -157,13 +166,24 @@ def write_cards(
             )
 
 
-def count_text(changes: list[dict]) -> str:
-    parts = [f"{n} {t}" for t in ("moved", "added", "removed") if (n := sum(c["type"] == t for c in changes))]
-    if not parts:
-        return "no changes"
-    listed = " and ".join([", ".join(parts[:-1]), parts[-1]] if len(parts) > 1 else parts)
-    unverified = sum(c["status"] == "unverified" for c in changes)
-    return f"{len(changes)} change{'s' * (len(changes) != 1)} ({listed}), {unverified} of them unverified"
+def pct(x: float) -> str:
+    return f"{100 * x:.0f} %"
+
+
+def join_and(parts: list[str]) -> str:
+    return " and ".join([", ".join(parts[:-1]), parts[-1]] if len(parts) > 1 else parts)
+
+
+def count_text(counts: dict) -> str:
+    n = counts["moved"] + counts["added"] + counts["removed"]
+    parts = ", ".join(f"{counts[t]} {t}" for t in ("moved", "added", "removed") if counts[t])
+    unverified = f"; {counts['unverified']} of them unverified" if counts["unverified"] else ""
+    return f"{n} change{'s' * (n != 1)}: {parts}{unverified}" if n else "no changes"
+
+
+def evidence_text(e: dict) -> str:
+    shares = [f"{pct(e[k])} {w}" for k, w in STATE_WORDS.items() if round(100 * e[k])]
+    return f"{e['points']:,} points: {', '.join(shares)}"
 
 
 def write_floorplan(
@@ -177,7 +197,6 @@ def write_floorplan(
     xyz, state = np.concatenate([before.xyz, after.xyz]), np.concatenate(states)
     paths = [c[:, :2, 3] for c in cameras]  # (N, 2) camera centres on the floor, in keyframe order
     boxes = [c[f"box_{s}"] for c in result["changes"] for s in SIDES if c[f"box_{s}"]]
-    boxes += [u["box"] for u in result["unchecked"]]
     ext = np.concatenate(
         [np.percentile(xyz[:, :2], [0.5, 99.5], 0), *paths, *(corners(b)[:, :2] for b in boxes)]
     )
@@ -215,10 +234,6 @@ def write_floorplan(
     d = ImageDraw.Draw(img, "RGBA")
     for side, p in zip(SIDES, paths):
         ring(d, px(p), VIDEO_RGB[side], 3, closed=False)
-    for u in result["unchecked"]:
-        fp = px(corners(u["box"])[[0, 1, 3, 2], :2])
-        ring(d, fp, GREY, 3, dash=10)
-        d.text(tuple(fp[np.lexsort(fp.T)[0]] + [6, 4]), u["id"], font=font(26), fill=GREY)
     taken, anchors = [], []
     for c in result["changes"]:
         k, col = kind(c), ImageColor.getrgb(COLORS[kind(c)])
@@ -267,7 +282,7 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> No
     texts = {"moved": "moved, arrow from old to new place", "unverified": "unverified, dashed outline"}
     rows = [(k, texts.get(k, k)) for k in COLORS] + [("film", "where to film next (unverified)")]
     rows += [(None, "Not checked")] + [(v, f"seen only in the {v} video") for v in SIDES]
-    rows += [("unchecked", "unchecked area (U1, U2, ...)"), (None, "Context")]
+    rows += [(None, "Context")]
     rows += [("height", f"structure, darker is higher (0 to {HEIGHT_TOP} m)")]
     rows += [("path", "camera paths of both videos")]
     y += 104
@@ -276,15 +291,12 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> No
             d.text((x, y + 24), text, font=f, fill="black")
             y += 70
             continue
-        box = np.array([[x, y], [x + 48, y], [x + 48, y + 34], [x, y + 34]])
         if sample in COLORS:
             tag(d, x, y, sample, "", 34)
         elif sample == "film":
             camera_glyph(d, np.array([x + 2.0, y + 17]), np.array([x + 54.0, y + 17]))
         elif sample in SIDES:
             d.rectangle((x, y, x + 48, y + 34), fill=(*VIDEO_RGB[sample], 60))
-        elif sample == "unchecked":
-            ring(d, box, GREY, 3, dash=8)
         elif sample == "height":
             for i in range(48):
                 d.line([(x + i, y), (x + i, y + 34)], fill=(int(236 - 116 * i / 47),) * 3)
@@ -297,18 +309,14 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> No
         y += 50
 
 
-def pct(x: float) -> str:
-    return f"{100 * x:.0f} %"
-
-
 def write_report(path: Path, result: dict) -> None:
     changes, cov, led = result["changes"], result["coverage"], result["ledger"]
     out = [
         f"""# What changed in the room
 
-Between {result["before"]} and {result["after"]} roomdiff found {count_text(changes)}. An unverified change is
-one whose place the other video did not see well enough to decide. The camera was held
-{result["camera_height_m"]:.2f} m above the floor; positions are in metres with z up and the floor at z = 0.
+Between {result["before"]} and {result["after"]} roomdiff found {count_text(result["counts"])}.
+Unverified means {UNVERIFIED}. The camera was held {result["camera_height_m"]:.2f} m above the
+floor; positions are in metres with z up and the floor at z = 0.
 
 ![Top view of the changes](floorplan.png)
 
@@ -319,51 +327,44 @@ one whose place the other video did not see well enough to decide. The camera wa
         out.append(f"| {c['id']} | {GLYPHS[kind(c)]} | {c['type']} | {c['label']} | {c['status']} | ")
         out[-1] += f"{c['sentence']} |"
     for c in changes:
-        e, mo, w = c["evidence"], c["motion"], c.get("check_from")
-        facts = [f"Status: {c['status']}, because {c['reason']}."]
+        mo, w = c["motion"], c.get("check_from")
+        facts = [f"Status: {c['status']} ({c['reason']})."]
         if mo:
             turn = f", turned {mo['turn_deg']:.0f} degrees" if mo["turn_deg"] is not None else ""
             facts.append(f"Motion: {mo['distance_m']:.2f} m{turn}.")
         if c.get("floor_blocked_m2"):
             facts.append(f"Floor now blocked: {c['floor_blocked_m2']:.2f} m².")
         if w:
-            p, q = (", ".join(f"{v:.2f}" for v in w[k]) for k in ("position", "look_at"))
-            facts.append(f"Where to film next: where the {w['video']} video stood at {w['time_s']:.1f} s, ")
-            facts[-1] += f"at ({p}), looking at ({q})."
-        facts.append(
-            f"Evidence: of its {e['points']} points, the other video looked through {pct(e['free'])}, "
-        )
-        facts[-1] += (
-            f"saw {pct(e['seen'])}, had {pct(e['occluded'])} hidden, never had {pct(e['unreached'])} in view."
-        )
+            facts.append(f"Film again from where the {w['video']} video stood at {w['time_s']:.1f} s.")
+        facts.append(f"Evidence: {evidence_text(c['evidence'])}.")
         cards = " ".join(
             f'<img src="{c["cards"][s]}" width="49%">' if c["cards"][s] else f"(no {s} view)" for s in SIDES
         )
         bullets = "\n".join(f"- {f}" for f in facts)
         out.append(f"\n## {GLYPHS[kind(c)]} {c['id']}: {c['label']}, {c['type']}\n\n{c['sentence']}")
         out.append(f"\n{bullets}\n\n{cards}")
-    unchecked = "\n".join(
-        f"- {u['id']} (seen only in the {u['video']} video): {u['sentence']}" for u in result["unchecked"]
-    )
+    one = [f"{pct(cov[f'only_{v}'])} only in the {v} video" for v in SIDES if round(100 * cov[f"only_{v}"])]
+    if one:
+        one = f" The rest was seen by one video only: {join_and(one)}; the top view tints those parts."
+    names = {
+        "confirmed": "confirmed changes",
+        "unverified": "unverified changes",
+        "dismissed": "dismissed candidates",
+    }
+    ledger = [
+        f"{pct(led[k])} {n}" for k, n in (names | {"residual": "no candidate"}).items() if round(100 * led[k])
+    ]
     out.append(f"""
-## Areas that were not checked
-
-{unchecked or "Both videos saw every place that holds a candidate change."}
-
 ## Coverage
 
-The other video checked {pct(cov["checked"])} of all surface points. {pct(cov["only_before"])} were seen only
-in the before video and {pct(cov["only_after"])} only in the after video; the tinted parts of the top view
-show where.
+The other video checked {pct(cov["checked"])} of all surface points.{one}
 
-Of all surface points that the other video looked through, {pct(led["confirmed"])} belong to confirmed
-changes, {pct(led["unverified"])} to unverified changes, {pct(led["dismissed"])} to dismissed candidates and
-{pct(led["residual"])} to no candidate.
+The points the other video looked through belong to: {join_and(ledger)}.
 
 ## Method
 
 Both videos were reconstructed in one pass into a shared metric frame with z up and the floor at z = 0. A
 surface counts as removed or added only where the other video looked through the place it occupied, and each
-change keeps the share of its points that were looked through, seen, hidden or never in view.
+change keeps the share of its points that were looked through, still seen, hidden or not in view.
 """)
     path.write_text("\n".join(out))

@@ -68,9 +68,9 @@ def load_pi3x(device: torch.device):
 
 
 def run_pi3x(images: np.ndarray, device: torch.device) -> dict[str, np.ndarray]:
+    model = load_pi3x(device)
     import pi3.models.layers.attention as pi3_attention
 
-    model = load_pi3x(device)
     x = torch.from_numpy(images).to(device).permute(0, 3, 1, 2).float().div(255)
     # Pi3 imports scaled_dot_product_attention by name, so the patch must target its module.
     sdpa = functools.partial(chunked_attention, pi3_attention.scaled_dot_product_attention)

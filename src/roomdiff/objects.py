@@ -217,30 +217,28 @@ def verdict(o: Obj, cloud: Cloud, ev: Evidence, cfg: Config) -> None:
     # roughly the depth band times the sine of the viewing angle: up to about 10 cm.
     contact = min(0.10, max(0.03, 0.3 * float(np.ptp(z))))
     body = o.idx[z > z.min() + contact] if np.ptp(z) > 0.06 else o.idx
-    free, seen = ev.free[body].astype(float), ev.seen[body].astype(float)
-    checked = (free + seen) > 0
     state = point_states(ev, cfg)[body]
-    o.shares = {
-        k: round(float(np.mean(state == s)), 3)
-        for k, s in (("free", FREE), ("seen", SEEN), ("occluded", OCCLUDED), ("unreached", UNREACHED))
-    }
-    o.shares["points"] = int(len(o.idx))
-    observed = float(checked.mean()) if len(body) else 0.0
-    # Votes are summed over the object instead of first rounding every point to a state.
-    ratio = free.sum() / max(free.sum() + seen.sum(), 1)
+    names = (("free", FREE), ("seen", SEEN), ("occluded", OCCLUDED), ("unreached", UNREACHED))
+    o.shares = {k: round(float(np.mean(state == s)), 3) for k, s in names} | {"points": int(len(body))}
+    decided = o.shares["free"] + o.shares["seen"]
+    ratio = o.shares["free"] / max(decided, 1e-9)
     other = "after" if o.side == 0 else "before"
-    if observed < cfg.min_observed:
+    pct = lambda x: f"{100 * x:.0f} %"  # noqa: E731
+    if decided < cfg.min_observed:
         why = "hidden behind other things" if o.shares["occluded"] > o.shares["unreached"] else "out of view"
         o.status, o.reason = (
             "unverified",
-            f"the {other} video checked only {observed:.0%} of it; the rest was {why}",
+            f"the {other} video could check only {pct(decided)} of it; the rest was {why}",
         )
     elif ratio >= cfg.confirm_ratio:
-        o.status, o.reason = "confirmed", f"the {other} video looked through {ratio:.0%} of its surface"
+        o.status, o.reason = (
+            "confirmed",
+            f"the {other} video looked through {pct(ratio)} of the points it could check",
+        )
     elif ratio >= cfg.partial_ratio:
         o.status, o.reason = (
             "partial",
-            f"the {other} video looked through {ratio:.0%} of it; the rest is still there",
+            f"the {other} video looked through {pct(ratio)} of it; the rest is still there",
         )
     else:
-        o.status, o.reason = "dismissed", f"the {other} video still saw {1 - ratio:.0%} of it"
+        o.status, o.reason = "dismissed", f"the {other} video still saw {pct(1 - ratio)} of it"

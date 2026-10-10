@@ -959,7 +959,7 @@ dev = [
 requires-dist = [
     { name = "av", specifier = ">=14" },
     { name = "huggingface-hub", specifier = ">=0.30" },
-    { name = "numpy", specifier = ">=1.26" },
+    { name = "numpy", specifier = ">=2.0" },
     { name = "pi3", git = "https://github.com/yyfz/Pi3?rev=9fa3ddb3f8d53041f8b2738df404f62223bbaa7b" },
     { name = "pillow", specifier = ">=10" },
     { name = "safetensors", specifier = ">=0.4" },

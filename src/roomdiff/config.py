@@ -8,6 +8,9 @@ os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 import torch  # noqa: E402
+from transformers.utils import logging as transformers_logging  # noqa: E402
+
+transformers_logging.disable_progress_bar()
 
 
 @dataclass(frozen=True)

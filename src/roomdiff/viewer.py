@@ -23,6 +23,7 @@ def write_viewer(
     before: Cloud,
     after: Cloud,
     change_ids: tuple[np.ndarray, np.ndarray],
+    states: tuple[np.ndarray, np.ndarray],
     result: dict,
     cards_dir: Path,
     cameras: tuple[np.ndarray, np.ndarray],
@@ -36,7 +37,7 @@ def write_viewer(
         if c["box_before"] is not None:
             ids[1][inside(after.xyz, c["box_before"], 0.05) & (ids[1] == -1)] = -2
     clouds = {}
-    for name, c, cid in (("before", before, ids[0]), ("after", after, ids[1])):
+    for name, c, cid, state in (("before", before, ids[0], states[0]), ("after", after, ids[1], states[1])):
         # Thin out only the unchanged points; object and revealed points are few and carry the result.
         static = rng.permutation(np.nonzero(cid == -1)[0])[:max_points]
         keep = np.sort(np.concatenate([static, np.nonzero(cid != -1)[0]]))
@@ -44,6 +45,7 @@ def write_viewer(
             "xyz": b64(c.xyz[keep].astype("<f4")),
             "rgb": b64(c.rgb[keep].astype("u1")),
             "cid": b64(cid[keep].astype("<i2")),  # id in result["changes"]; -1 unchanged, -2 revealed
+            "st": b64(state[keep].astype("u1")),  # evidence state against the other video, 3 = never reached
         }
     cards = {
         c["id"]: {
