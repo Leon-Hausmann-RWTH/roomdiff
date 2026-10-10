@@ -14,7 +14,7 @@
    "id": 1,
    "type": "moved",
    "status": "confirmed",
-   "reason": "the after video looked through 96 % of the points it could check",
+   "reason": "the after video looked through 97 % of the points it could check",
    "label": "plastic bag",
    "label_score": 0.839,
    "sentence": "The plastic bag moved 0.3 m along the desk.",
@@ -71,11 +71,11 @@
    "floor_blocked_m2": null,
    "check_from": null,
    "evidence": {
-    "free": 0.614,
-    "seen": 0.028,
-    "occluded": 0.165,
-    "unreached": 0.193,
-    "points": 575
+    "free": 0.64,
+    "seen": 0.017,
+    "occluded": 0.135,
+    "unreached": 0.207,
+    "points": 517
    },
    "cards": {
     "before": "cards/1_before.jpg",
@@ -86,7 +86,7 @@
    "id": 2,
    "type": "added",
    "status": "confirmed",
-   "reason": "the before video looked through 68 % of the points it could check",
+   "reason": "the before video looked through 64 % of the points it could check",
    "label": "stuffed animal",
    "label_score": 0.827,
    "sentence": "A yellow stuffed animal appeared on the shelf (84 cm up).",
@@ -116,11 +116,11 @@
    "floor_blocked_m2": null,
    "check_from": null,
    "evidence": {
-    "free": 0.642,
-    "seen": 0.307,
+    "free": 0.612,
+    "seen": 0.341,
     "occluded": 0.0,
-    "unreached": 0.05,
-    "points": 218
+    "unreached": 0.047,
+    "points": 232
    },
    "cards": {
     "before": "cards/2_before.jpg",
@@ -165,7 +165,7 @@
     "seen": 0.0,
     "occluded": 0.0,
     "unreached": 0.0,
-    "points": 146
+    "points": 135
    },
    "cards": {
     "before": "cards/3_before.jpg",
@@ -174,7 +174,8 @@
   }
  ],
  "coverage": {
-  "checked": 0.82,
+  "checked": 0.725,
+  "hidden": 0.095,
   "only_before": 0.1,
   "only_after": 0.079
  },

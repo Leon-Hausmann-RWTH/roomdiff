@@ -14,7 +14,7 @@
    "id": 1,
    "type": "moved",
    "status": "confirmed",
-   "reason": "the after video looked through 72 % of the points it could check",
+   "reason": "the after video looked through 70 % of the points it could check",
    "label": "cushion",
    "label_score": 0.489,
    "sentence": "The grey cushion moved 1.6 m along the sofa.",
@@ -71,11 +71,11 @@
    "floor_blocked_m2": null,
    "check_from": null,
    "evidence": {
-    "free": 0.715,
-    "seen": 0.285,
+    "free": 0.705,
+    "seen": 0.295,
     "occluded": 0.0,
     "unreached": 0.0,
-    "points": 975
+    "points": 888
    },
    "cards": {
     "before": "cards/1_before.jpg",
@@ -86,7 +86,7 @@
    "id": 2,
    "type": "removed",
    "status": "confirmed",
-   "reason": "the after video looked through 94 % of the points it could check",
+   "reason": "the after video looked through 93 % of the points it could check",
    "label": "stool",
    "label_score": 0.805,
    "sentence": "The white stool on the floor was removed.",
@@ -116,11 +116,11 @@
    "floor_blocked_m2": null,
    "check_from": null,
    "evidence": {
-    "free": 0.924,
-    "seen": 0.064,
+    "free": 0.92,
+    "seen": 0.067,
     "occluded": 0.0,
-    "unreached": 0.012,
-    "points": 487
+    "unreached": 0.013,
+    "points": 462
    },
    "cards": {
     "before": "cards/2_before.jpg",
@@ -131,7 +131,7 @@
    "id": 3,
    "type": "removed",
    "status": "confirmed",
-   "reason": "the after video looked through 79 % of the points it could check",
+   "reason": "the after video looked through 87 % of the points it could check",
    "label": "blanket",
    "label_score": 0.296,
    "sentence": "The object on the sofa (83 cm up), possibly a blanket, was removed.",
@@ -161,11 +161,11 @@
    "floor_blocked_m2": null,
    "check_from": null,
    "evidence": {
-    "free": 0.609,
-    "seen": 0.166,
+    "free": 0.692,
+    "seen": 0.104,
     "occluded": 0.0,
-    "unreached": 0.225,
-    "points": 271
+    "unreached": 0.204,
+    "points": 221
    },
    "cards": {
     "before": "cards/3_before.jpg",
@@ -176,7 +176,7 @@
    "id": 4,
    "type": "removed",
    "status": "unverified",
-   "reason": "the after video looked through 38 % of it; the rest is still there",
+   "reason": "the after video looked through 38 % of it and still saw 62 %",
    "label": "shoe",
    "label_score": 0.469,
    "sentence": "The beige shoe on the shelf (50 cm up) may have been removed.",
@@ -219,14 +219,15 @@
   }
  ],
  "coverage": {
-  "checked": 0.776,
+  "checked": 0.703,
+  "hidden": 0.073,
   "only_before": 0.053,
   "only_after": 0.171
  },
  "ledger": {
   "confirmed": 0.875,
   "unverified": 0.018,
-  "dismissed": 0.081,
-  "residual": 0.026
+  "dismissed": 0.08,
+  "residual": 0.027
  }
 }
