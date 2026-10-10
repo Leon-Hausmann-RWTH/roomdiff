@@ -102,6 +102,9 @@ def name_changes(
         c.label, c.facts["label_score"] = label, round(float(score), 3)
         colour = color_name(np.concatenate([object_pixels(o, images) for o in objs]))
         name = f"{colour} {label}" if colour else label
+        if score < 0.25:
+            # Objects SigLIP scored under 0.25 were often misnamed on the SceneDiff check; say so.
+            name = f"object (possibly a {label})"
         box = fit_box(clouds[objs[0].side].xyz[objs[0].idx])
         c.facts["height_m"] = round(float(box.size[2]), 2)
         last = objs[-1]
@@ -134,11 +137,8 @@ def sentence(c: Change, name: str, first_view: Views) -> str:
     if c.facts.get("floor_blocked_m2", 0) >= 0.05:
         text = text[:-1] + f", blocking {c.facts['floor_blocked_m2']:.2f} m² of floor."
     if c.status == "unverified":
-        where = c.facts["check_from"]
-        text = (
-            f"Possibly: {text[0].lower()}{text[1:]} Not confirmed: {c.reason}. To check, film this spot "
-            f"from where the {where['video']} video stood at {where['time_s']:.0f} s."
-        )
+        # The reason and the viewpoint that would settle it travel as their own fields.
+        text = f"Possibly: {text[0].lower()}{text[1:]}"
     return text
 
 
@@ -169,14 +169,16 @@ def unchecked(cloud: Cloud, state: np.ndarray, side: int, taken: np.ndarray) -> 
         if len(idx) < 200:
             continue
         box = fit_box(cloud.xyz[idx])
-        if box.size[:2].max() < 0.3 or box.size.min() < 0.04:
+        # Object-sized only: long strips of wall or floor the other video skipped are coverage, which
+        # the floor plan shows as a tint, not a place where something may hide.
+        if not 0.3 <= box.size[:2].max() <= 1.5 or box.size.min() < 0.04:
             continue
         areas.append((len(idx), box))
     areas.sort(key=lambda a: -a[0])
     other = "after" if side == 0 else "before"
     return [
         {"video": "before" if side == 0 else "after", "box": b, "sentence": unchecked_sentence(b, other)}
-        for _, b in areas[:5]
+        for _, b in areas[:2]
     ]
 
 

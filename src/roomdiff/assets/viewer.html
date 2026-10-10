@@ -5,30 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>roomdiff viewer</title>
 <style>
-  :root { --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e2e0db;
-          --removed: #D55E00; --added: #0072B2; --moved: #CC79A7; --unverified: #8a8a8a; }
+  :root { --bg: #f6f5f2; --panel: #fff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e2e0db;
+          --unverified: #8A8A8A; --before: #009E73; --after: #E69F00; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
                font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   #app { display: flex; height: 100%; }
-  #view { flex: 1; position: relative; min-width: 0; }
+  #view { flex: 1; position: relative; min-width: 0; touch-action: none; }
   #view canvas { display: block; }
-  #panel { width: 340px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 16px; }
-  h1 { font-size: 16px; margin: 0 0 4px; }
-  .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
-  .modes { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-  .modes button { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  #panel { width: 390px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 16px; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  h2 { font-size: 12px; margin: 18px 0 6px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  p { margin: 0 0 10px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 4px 10px; color: var(--ink); }
+  .modes { display: flex; gap: 4px; margin-bottom: 6px; }
+  .modes button { flex: 1; padding: 5px 0; }
   .modes button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
-  .change { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
-  .change:hover { border-color: var(--muted); }
-  .tag { display: inline-block; min-width: 22px; text-align: center; font-weight: 700; color: #fff; border-radius: 4px; padding: 0 5px; margin-right: 6px; }
-  .removed .tag { background: var(--removed); } .added .tag { background: var(--added); }
-  .moved .tag { background: var(--moved); } .unverified .tag { background: var(--unverified); }
-  .meta { color: var(--muted); font-size: 12px; }
-  #legend { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,0.9); border: 1px solid var(--line);
-            border-radius: 8px; padding: 6px 10px; font-size: 12px; }
-  #legend span { margin-right: 10px; }
-  @media (max-width: 760px) { #app { flex-direction: column; } #panel { width: 100%; height: 45%; border-left: 0; border-top: 1px solid var(--line); } }
+  .hint { color: var(--muted); font-size: 12px; margin-bottom: 10px; min-height: 18px; }
+  .edit { display: flex; align-items: center; gap: 8px; }
+  .edit input { flex: 1; accent-color: var(--ink); }
+  #play { width: 36px; padding: 4px 0; }
+  #editval { width: 42px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; margin: 8px 0 4px; }
+  .item { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; margin-bottom: 8px; cursor: pointer; }
+  .item:hover { border-color: var(--muted); }
+  .item.unverified { border-style: dashed; border-color: var(--unverified); }
+  .item.sel { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+  .tag { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-width: 24px; height: 20px; padding: 0 6px;
+         border-radius: 4px; color: #fff; font-weight: 700; font-size: 13px; margin-right: 6px; vertical-align: 1px; }
+  .st { color: var(--muted); font-size: 12px; margin-left: 4px; }
+  .sent { margin: 4px 0 2px; }
+  .reason { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .bar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: #eee; }
+  .bar i { display: block; height: 100%; }
+  .barlab { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+  .cards figure { margin: 0; }
+  .cards img { width: 100%; display: block; border-radius: 4px; cursor: zoom-in; }
+  .cards figcaption { font-size: 11px; color: var(--muted); }
+  .cards .none { aspect-ratio: 4 / 3; display: flex; align-items: center; justify-content: center; background: #f0efeb;
+                 border-radius: 4px; color: var(--muted); font-size: 11px; }
+  .uitem { font-size: 13px; margin-bottom: 6px; }
+  #legend { position: absolute; left: 10px; bottom: 10px; background: rgba(255, 255, 255, .92); border: 1px solid var(--line);
+            border-radius: 8px; padding: 6px 10px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: calc(100% - 20px); }
+  #legend .tag { height: 16px; min-width: 18px; font-size: 11px; margin-right: 3px; padding: 0 4px; }
+  #legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  #lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, .82); display: none; align-items: center; justify-content: center;
+              z-index: 9; cursor: zoom-out; }
+  #lightbox img { max-width: 94vw; max-height: 90vh; }
+  @media (max-width: 760px) {
+    #app { flex-direction: column; }
+    #view { flex: none; height: 50vh; }
+    #panel { width: 100%; flex: 1; border-left: 0; border-top: 1px solid var(--line); padding: 12px 16px; }
+    #legend { font-size: 11px; left: 6px; bottom: 6px; padding: 4px 8px; gap: 2px 10px; }
+  }
 </style>
 </head>
 <body>
@@ -36,16 +67,47 @@
   <div id="view"><div id="legend"></div></div>
   <div id="panel">
     <h1>What changed in the room</h1>
-    <div class="sub" id="summary"></div>
+    <p class="sub" id="summary"></p>
     <div class="modes" id="modes"></div>
+    <div class="hint" id="hint"></div>
+    <div class="edit">
+      <button id="play" title="Play the edits">&#9654;</button>
+      <input id="edit" type="range" min="0" max="1" step="0.01" value="0" aria-label="Share of the detected edits applied to the before scene">
+      <span id="editval">0 %</span>
+    </div>
+    <div class="hint">Slider: the detected edits applied to the before scene, from none to all.</div>
+    <div class="toggles">
+      <label><input type="checkbox" id="showUnchecked" checked> areas not checked</label>
+      <label><input type="checkbox" id="showPaths"> camera paths</label>
+      <label><input type="checkbox" id="showFilm"> where to film next</label>
+    </div>
+    <h2>Changes</h2>
     <div id="list"></div>
+    <h2>Not checked</h2>
+    <div id="unchecked"></div>
+    <p class="sub" id="coverage"></p>
   </div>
 </div>
+<div id="lightbox"><img alt="evidence card"></div>
 <script>/*THREE*/</script>
 <script>/*ORBIT*/</script>
 <script>
 const DATA = /*DATA*/;
-const STYLE = { removed: ['#D55E00', '−'], added: ['#0072B2', '+'], moved: ['#CC79A7', '→'], unverified: ['#8a8a8a', '?'] };
+const R = DATA.result;
+const STYLE = { removed: ['#D55E00', '−'], added: ['#0072B2', '+'], moved: ['#CC79A7', '→'], unverified: ['#8A8A8A', '?'] };
+const VIDEO = { before: '#009E73', after: '#E69F00' };
+const SIDES = ['before', 'after'];
+const HINTS = {
+  Before: 'Before video in its own colours. Move the slider to apply the detected edits.',
+  After: 'After video in its own colours. Boxes without points mark places that are now empty.',
+  Overlay: 'Both videos: before in green, after in amber.',
+  Changes: 'Unchanged points in grey, changed objects in the colour of their change.',
+};
+const kindOf = c => c.status === 'unverified' ? 'unverified' : c.type;
+const pct = x => Math.round(100 * x) + ' %';
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+const $ = id => document.getElementById(id);
+const tagHtml = (k, text) => `<span class="tag" style="background:${STYLE[k][0]}">${STYLE[k][1]}${text === '' ? '' : ' ' + text}</span>`;
 
 function decode(b64, Type) {
   const bin = atob(b64), bytes = new Uint8Array(bin.length);
@@ -53,7 +115,7 @@ function decode(b64, Type) {
   return new Type(bytes.buffer);
 }
 
-const view = document.getElementById('view');
+const view = $('view');
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 view.appendChild(renderer.domElement);
@@ -64,67 +126,319 @@ camera.up.set(0, 0, 1);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
-function cloud(part, tint) {
-  const xyz = decode(part.xyz, Float32Array), rgb = decode(part.rgb, Uint8Array);
+function points(xyz, rgb, size) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(xyz, 3));
-  const col = new Float32Array(rgb.length);
-  for (let i = 0; i < rgb.length; i++) col[i] = rgb[i] / 255;
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const m = new THREE.PointsMaterial({ size: 0.018, vertexColors: true, transparent: true, opacity: 1 });
-  const p = new THREE.Points(g, m);
-  scene.add(p);
+  g.setAttribute('color', new THREE.BufferAttribute(rgb.slice(), 3));
+  const p = new THREE.Points(g, new THREE.PointsMaterial({ size, vertexColors: true, transparent: true }));
+  p.userData.rgb = rgb;
   return p;
 }
-const before = cloud(DATA.points.before), after = cloud(DATA.points.after);
 
-function boxLines(b, color) {
-  const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]));
-  const mat = new THREE.LineBasicMaterial({ color, linewidth: 2 });
-  const l = new THREE.LineSegments(geo, mat);
-  l.position.set(b.center[0], b.center[1], b.center[2]);
-  l.rotation.z = b.yaw;
-  scene.add(l);
-  return l;
+// One point set for the unchanged points of a video and one per change id, so each can fade or move on its own.
+function split(part) {
+  const xyz = decode(part.xyz, Float32Array), rgb = decode(part.rgb, Uint8Array), cid = decode(part.cid, Int16Array);
+  const groups = new Map();
+  cid.forEach((id, i) => { if (!groups.has(id)) groups.set(id, []); groups.get(id).push(i); });
+  const out = new Map();
+  groups.forEach((idx, id) => {
+    const p = new Float32Array(idx.length * 3), c = new Float32Array(idx.length * 3);
+    idx.forEach((i, j) => { for (let k = 0; k < 3; k++) { p[3 * j + k] = xyz[3 * i + k]; c[3 * j + k] = rgb[3 * i + k] / 255; } });
+    // Three.js scales point size by half the view height, not the focal length; 0.04 covers a 2 cm voxel at 50 degrees.
+    out.set(id, points(p, c, id < 0 ? 0.036 : 0.044));
+  });
+  return out;
 }
-const groups = DATA.changes.map(c => {
-  const color = STYLE[c.status === 'unverified' ? 'unverified' : c.type][0];
-  const g = [];
-  if (c.box_before) g.push(boxLines(c.box_before, color));
-  if (c.box_after) g.push(boxLines(c.box_after, color));
+
+function paint(p, f) {
+  const src = p.userData.rgb, dst = p.geometry.attributes.color.array;
+  for (let i = 0; i < src.length; i += 3) {
+    const o = f(src[i], src[i + 1], src[i + 2], 0.3 * src[i] + 0.59 * src[i + 1] + 0.11 * src[i + 2]);
+    dst[i] = o[0]; dst[i + 1] = o[1]; dst[i + 2] = o[2];
+  }
+  p.geometry.attributes.color.needsUpdate = true;
+}
+const asIs = (r, g, b) => [r, g, b];
+const dim = (r, g, b, l) => { const v = 0.8 + 0.14 * l; return [v, v, v]; };
+const shaded = hex => { const c = new THREE.Color(hex); return (r, g, b, l) => [c.r, c.g, c.b].map(x => Math.min(1, x * (0.55 + 0.6 * l))); };
+
+function place(o, b) { o.position.set(...b.center); o.rotation.z = b.yaw; return o; }
+function edges(b, color, dashed) {
+  const mat = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.04, gapSize: 0.03, transparent: true })
+                     : new THREE.LineBasicMaterial({ color, transparent: true });
+  const l = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(...b.size)), mat);
+  if (dashed) l.computeLineDistances();
+  return place(l, b);
+}
+function fill(b, color, opacity) {
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  return place(new THREE.Mesh(new THREE.BoxGeometry(...b.size), mat), b);
+}
+// A tag that keeps its size on screen and stays visible through points, sitting on top of its box.
+// Unchecked areas get an outlined tag so they do not read as unverified changes.
+function label(text, color, b, outlined) {
+  const cv = document.createElement('canvas'), ctx = cv.getContext('2d'), font = 'bold 40px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.font = font;
+  cv.width = Math.ceil(ctx.measureText(text).width) + 28; cv.height = 60;
+  ctx.font = font; ctx.fillStyle = outlined ? 'rgba(255, 255, 255, 0.9)' : color; ctx.strokeStyle = color; ctx.lineWidth = 4;
+  ctx.setLineDash([8, 5]);
+  ctx.beginPath(); ctx.roundRect(2, 2, cv.width - 4, cv.height - 4, 12); ctx.fill();
+  if (outlined) ctx.stroke();
+  ctx.fillStyle = outlined ? color : '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(text, 14, 32);
+  const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true, sizeAttenuation: false });
+  const s = new THREE.Sprite(mat);
+  s.scale.set(0.042 * cv.width / cv.height, 0.042, 1);
+  s.center.set(0.5, -0.2);
+  s.renderOrder = 10;
+  s.position.set(b.center[0], b.center[1], b.center[2] + b.size[2] / 2);
+  return s;
+}
+
+const clouds = { before: split(DATA.clouds.before), after: split(DATA.clouds.after) };
+const statics = SIDES.map(s => clouds[s].get(-1));
+statics.forEach(p => scene.add(p));
+
+const items = R.changes.map(c => {
+  const k = kindOf(c), color = STYLE[k][0], o = { c, k, color };
+  for (const side of SIDES) {
+    const b = c['box_' + side];
+    if (!b) continue;
+    const g = new THREE.Group(), pts = clouds[side].get(c.id), e = edges(b, color, k === 'unverified'), f = fill(b, color, 0.16);
+    if (pts) g.add(pts);
+    g.add(e, f, label(`${STYLE[k][1]} ${c.id}`, color, b));
+    scene.add(g);
+    o[side] = { g, pts, e, f };
+  }
+  if (c.type === 'moved') {
+    const a = new THREE.Vector3(...c.box_before.center), b = new THREE.Vector3(...c.box_after.center);
+    const lift = Math.max(c.box_before.size[2], c.box_after.size[2]) / 2 + 0.05;
+    a.z += lift; b.z += lift;
+    const len = a.distanceTo(b);
+    o.arrow = new THREE.ArrowHelper(b.clone().sub(a).normalize(), a, len, color, Math.min(0.12, len / 3), Math.min(0.07, len / 5));
+    scene.add(o.arrow);
+  }
+  return o;
+});
+
+const unchecked = new THREE.Group();
+R.unchecked.forEach(u => unchecked.add(fill(u.box, 0x8a8a8a, 0.05), edges(u.box, 0x8a8a8a, true), label(u.id, '#6b6b70', u.box, true)));
+scene.add(unchecked);
+
+// A grey wireframe camera where filming would settle an unverified change, with a dashed sight line to the spot.
+function ghostCamera(c) {
+  const w = c.check_from, at = new THREE.Vector3(...w.look_at), g = new THREE.Group(), body = new THREE.Group();
+  const q = [[-0.16, -0.1], [0.16, -0.1], [0.16, 0.1], [-0.16, 0.1]].map(([x, y]) => [x, y, 0.26]);
+  const segs = q.flatMap((p, i) => [0, 0, 0, ...p, ...p, ...q[(i + 1) % 4]]);
+  body.add(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(segs, 3)),
+                                  new THREE.LineBasicMaterial({ color: 0x55555a })));
+  body.position.set(...w.position);
+  body.up.set(0, 0, 1);
+  body.lookAt(at);
+  const sight = new THREE.Line(new THREE.BufferGeometry().setFromPoints([body.position, at]),
+                               new THREE.LineDashedMaterial({ color: 0x8a8a8a, dashSize: 0.05, gapSize: 0.04 }));
+  sight.computeLineDistances();
+  g.add(body, sight, label(`film ${c.id} here`, '#55555a', { center: w.position, size: [0, 0, 0.12] }, true));
+  scene.add(g);
   return g;
-});
-
-const MODES = { Before: [1, 0], After: [0, 1], Both: [1, 1] };
-const modes = document.getElementById('modes');
-function setMode(name) {
-  const [b, a] = MODES[name];
-  before.visible = !!b; after.visible = !!a;
-  [...modes.children].forEach(x => x.classList.toggle('on', x.textContent === name));
 }
-Object.keys(MODES).forEach(n => { const btn = document.createElement('button'); btn.textContent = n; btn.onclick = () => setMode(n); modes.appendChild(btn); });
-setMode('Both');
+items.forEach(o => { if (o.c.check_from) o.ghost = ghostCamera(o.c); });
 
-document.getElementById('summary').textContent = DATA.summary;
-document.getElementById('legend').innerHTML = Object.entries(STYLE).map(([k, [c, g]]) => `<span style="color:${c}"><b>${g}</b> ${k}</span>`).join('');
-const list = document.getElementById('list');
-DATA.changes.forEach((c, i) => {
-  const kind = c.status === 'unverified' ? 'unverified' : c.type;
-  const div = document.createElement('div');
-  div.className = 'change ' + kind;
-  div.innerHTML = `<div><span class="tag">${STYLE[kind][1]}</span><b>#${c.id} ${c.label}</b> <span class="meta">${c.type}, ${c.status}</span></div>` +
-                  `<div>${c.sentence}</div>`;
-  div.onclick = () => { const b = c.box_after || c.box_before; controls.target.set(...b.center); camera.position.set(b.center[0] + 1.5, b.center[1] - 1.5, b.center[2] + 1.2); };
-  list.appendChild(div);
+const paths = new THREE.Group();
+SIDES.forEach(side => {
+  const pts = DATA.cameras[side].map(p => new THREE.Vector3(...p));
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  paths.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: VIDEO[side] })));
+  paths.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: VIDEO[side], size: 0.04 })));
+  paths.add(new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({ color: VIDEO[side] })).translateX(pts[0].x).translateY(pts[0].y).translateZ(pts[0].z));
+});
+paths.visible = false;
+scene.add(paths);
+
+let mode = 'Changes', painted = null, edit = 0, selected = null, playing = false, playT0 = 0, fly = null;
+
+function fade(obj, a) {
+  if (!obj) return;
+  obj.visible = a > 0.01;
+  obj.material.opacity = a;
+  obj.material.depthWrite = a > 0.99;
+}
+
+// Spin about the object's own centre while that centre travels in a straight line; at s = 1 this is p_after = Rz(yaw) p + t.
+function moveTo(o, s) {
+  const tr = o.c.transform, p = o.c.box_before.center, g = o.before.g;
+  const cy = Math.cos(tr.yaw), sy = Math.sin(tr.yaw);
+  const end = [cy * p[0] - sy * p[1] + tr.t[0], sy * p[0] + cy * p[1] + tr.t[1], p[2] + tr.t[2]];
+  const yaw = s * tr.yaw, c = Math.cos(yaw), sn = Math.sin(yaw);
+  g.rotation.z = yaw;
+  g.position.set(p[0] + s * (end[0] - p[0]) - (c * p[0] - sn * p[1]), p[1] + s * (end[1] - p[1]) - (sn * p[0] + c * p[1]), s * (end[2] - p[2]));
+}
+
+function repaint() {
+  painted = mode;
+  const object = (o, side) => mode === 'Overlay' ? shaded(VIDEO[side]) : mode === 'Changes' ? shaded(o.color) : asIs;
+  statics.forEach((p, i) => paint(p, mode === 'Overlay' ? shaded(VIDEO[SIDES[i]]) : mode === 'Changes' ? dim : asIs));
+  items.forEach(o => SIDES.forEach(side => o[side] && o[side].pts && paint(o[side].pts, object(o, side))));
+}
+
+function apply() {
+  if (painted !== mode) repaint();
+  const s = edit, ghost = x => 0.2 + 0.8 * x;
+  statics[0].visible = mode !== 'After';
+  statics[1].visible = mode !== 'Before';
+  items.forEach(o => {
+    const t = o.c.type, B = o.before, A = o.after;
+    let pb = 1, eb = 1, pa = 1, ea = 1, show = [true, true];
+    if (mode === 'Before') {
+      if (t === 'removed') { pb = 1 - s; eb = Math.max(0.3, 1 - s); }
+      if (t === 'added') { pa = s; ea = Math.max(0.3, s); }
+      if (t === 'moved') show = [true, false];
+    } else if (mode === 'After') {
+      pb = 0;
+      eb = t === 'removed' ? 1 : 0.3;
+    } else if (mode === 'Changes') {
+      if (t === 'removed') pb = ghost(1 - s);
+      if (t === 'added') pa = ghost(s);
+      if (t === 'moved') { pa = 0.2; ea = 0.4; }
+    }
+    if (t === 'moved') moveTo(o, mode === 'Before' || mode === 'Changes' ? s : 0);
+    const focus = !selected || selected === o ? 1 : 0.3;
+    [[B, pb, eb, show[0]], [A, pa, ea, show[1]]].forEach(([part, p, e, vis]) => {
+      if (!part) return;
+      part.g.visible = vis;
+      fade(part.pts, p);
+      fade(part.e, selected === o ? 1 : e * focus);
+      part.f.visible = selected === o;
+    });
+  });
+  unchecked.visible = $('showUnchecked').checked;
+  paths.visible = $('showPaths').checked;
+  items.forEach(o => { if (o.ghost) o.ghost.visible = $('showFilm').checked || selected === o; });
+  legend();
+}
+
+function legend() {
+  const kinds = ['removed', 'added', 'moved', 'unverified'].map(k => `<span>${tagHtml(k, '')}${k === 'unverified' ? 'unverified, dashed' : k}</span>`);
+  if (unchecked.visible && R.unchecked.length) kinds.push('<span><i class="sw" style="background:#eee;border:1px dashed #6b6b70"></i>not checked</span>');
+  if (items.some(o => o.ghost && o.ghost.visible)) kinds.push('<span><i class="sw" style="border:2px solid #55555a"></i>grey camera: where to film next</span>');
+  if (mode === 'Overlay' || paths.visible) SIDES.forEach(s => kinds.push(`<span><i class="sw" style="background:${VIDEO[s]}"></i>${s} video</span>`));
+  // Rebuilt on every slider step while playing, so touch the DOM only when the content changes.
+  const html = kinds.join('');
+  if (legend.html !== html) $('legend').innerHTML = legend.html = html;
+}
+
+function setMode(name) {
+  mode = name;
+  [...$('modes').children].forEach(b => b.classList.toggle('on', b.textContent === name));
+  $('hint').textContent = HINTS[name];
+  apply();
+}
+Object.keys(HINTS).forEach(n => {
+  const b = document.createElement('button');
+  b.textContent = n;
+  b.onclick = () => setMode(n);
+  $('modes').appendChild(b);
 });
 
-const c0 = DATA.view_center;
-controls.target.set(c0[0], c0[1], c0[2]);
-camera.position.set(c0[0] + DATA.view_radius, c0[1] - DATA.view_radius, c0[2] + DATA.view_radius * 0.9);
+function setEdit(s) {
+  edit = s;
+  $('edit').value = s;
+  $('editval').textContent = pct(s);
+  // The slider edits the before scene, so a view of the after video switches to the before video.
+  if (mode === 'After' || mode === 'Overlay') setMode('Before'); else apply();
+}
+$('edit').oninput = e => { playing = false; $('play').innerHTML = '&#9654;'; setEdit(+e.target.value); };
+$('play').onclick = () => {
+  playing = !playing;
+  $('play').innerHTML = playing ? '&#10074;&#10074;' : '&#9654;';
+  playT0 = performance.now() - (edit > 0 ? 1100 + 2200 * edit : 0);
+};
+$('showUnchecked').onchange = apply;
+$('showPaths').onchange = apply;
+$('showFilm').onchange = apply;
+$('showFilm').parentNode.hidden = !items.some(o => o.ghost);
 
-function resize() { const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
-window.addEventListener('resize', resize); resize();
-(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+function select(o) {
+  selected = selected === o ? null : o;
+  items.forEach(x => x.div.classList.toggle('sel', x === selected));
+  apply();
+  if (!selected) return;
+  const boxes = [o.c.box_before, o.c.box_after].filter(Boolean), w = o.c.check_from;
+  let centre = boxes.reduce((a, b) => a.add(new THREE.Vector3(...b.center)), new THREE.Vector3()).divideScalar(boxes.length);
+  let r = Math.max(...boxes.map(b => Math.hypot(...b.size) / 2));
+  if (boxes.length === 2) r += new THREE.Vector3(...boxes[0].center).distanceTo(new THREE.Vector3(...boxes[1].center)) / 2;
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  dir.z = Math.max(dir.z, 0.6);
+  dir.normalize();
+  let eye = centre.clone().addScaledVector(dir, Math.max(1.8, 4 * r));
+  if (w) {
+    // Stand a little behind and above the ghost camera, so the view shows what filming from there would see.
+    centre = new THREE.Vector3(...w.look_at);
+    const back = new THREE.Vector3(...w.position).sub(centre);
+    eye = centre.clone().addScaledVector(back, 1 + 0.9 / back.length()).add(new THREE.Vector3(0, 0, 0.5));
+  }
+  fly = { t0: performance.now(), p0: camera.position.clone(), q0: controls.target.clone(), q1: centre, p1: eye };
+}
+
+const n = R.changes.length, unv = R.changes.filter(c => c.status === 'unverified').length;
+const parts = ['moved', 'added', 'removed'].map(t => [t, R.changes.filter(c => c.type === t).length]).filter(x => x[1]).map(([t, k]) => `${k} ${t}`);
+const listed = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts.join('');
+$('summary').textContent = n ? `${n} change${n === 1 ? '' : 's'} between ${R.before} and ${R.after} (${listed}), ${unv} of them unverified.`
+                             : `No changes between ${R.before} and ${R.after}.`;
+
+const BAR = [['free', null, 'looked through'], ['seen', '#3a3a3c', 'seen'], ['occluded', '#b5b3ad', 'hidden'], ['unreached', '#e4e2dd', 'not in view']];
+items.forEach(o => {
+  const c = o.c, e = c.evidence, cards = DATA.cards[c.id] || {}, div = document.createElement('div');
+  div.className = 'item ' + o.k;
+  div.innerHTML =
+    `<div>${tagHtml(o.k, c.id)}<b>${esc(c.label)}</b><span class="st">${c.type}, ${c.status}</span></div>` +
+    `<div class="sent">${esc(c.sentence)}</div><div class="reason">${esc(c.reason)}</div>` +
+    (c.check_from ? `<div class="reason">Where to film next: from where the ${c.check_from.video} video stood at ` +
+                    `${c.check_from.time_s.toFixed(1)} s (grey camera in the view).</div>` : '') +
+    `<div class="bar">${BAR.map(([k, col]) => `<i style="width:${100 * e[k]}%;background:${col || o.color}"></i>`).join('')}</div>` +
+    `<div class="barlab">${e.points} points: ${BAR.map(([k, , name]) => `${name} ${pct(e[k])}`).join(', ')}</div>` +
+    `<div class="cards">${SIDES.map(s => `<figure>${cards[s] ? `<img src="${cards[s]}" alt="${s} video">` : `<div class="none">no ${s} view</div>`}` +
+                                         `<figcaption>${s}</figcaption></figure>`).join('')}</div>`;
+  div.onclick = () => select(o);
+  div.querySelectorAll('img').forEach(img => { img.onclick = ev => { ev.stopPropagation(); $('lightbox').firstChild.src = img.src; $('lightbox').style.display = 'flex'; }; });
+  $('list').appendChild(div);
+  o.div = div;
+});
+$('lightbox').onclick = () => { $('lightbox').style.display = 'none'; };
+$('unchecked').innerHTML = R.unchecked.map(u => `<div class="uitem"><b>${esc(u.id)}</b> seen only in the ${u.video} video. ${esc(u.sentence)}</div>`).join('')
+                         || '<div class="uitem">Both videos saw every place that holds a candidate change.</div>';
+const cov = R.coverage;
+$('coverage').textContent = `The other video checked ${pct(cov.checked)} of all surface points; ${pct(cov.only_before)} were seen only before and ${pct(cov.only_after)} only after.`;
+
+const c0 = DATA.center, r0 = DATA.radius;
+controls.target.set(c0[0], c0[1], c0[2] - 0.2);
+camera.position.set(c0[0] + 0.4 * r0, c0[1] - 0.45 * r0, c0[2] + 0.62 * r0);
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+setMode('Changes');
+
+(function loop(now) {
+  requestAnimationFrame(loop);
+  if (fly) {
+    const t = Math.min(1, (now - fly.t0) / 800), e = t * t * (3 - 2 * t);
+    camera.position.lerpVectors(fly.p0, fly.p1, e);
+    controls.target.lerpVectors(fly.q0, fly.q1, e);
+    if (t === 1) fly = null;
+  }
+  if (playing) {
+    // One cycle: hold the before scene, apply the edits, hold, undo them; 6.6 s in all.
+    const t = ((now - playT0) / 1000) % 6.6, ramp = x => x * x * (3 - 2 * x);
+    setEdit(t < 1.1 ? 0 : t < 3.3 ? ramp((t - 1.1) / 2.2) : t < 4.4 ? 1 : ramp(1 - (t - 4.4) / 2.2));
+  }
+  controls.update();
+  renderer.render(scene, camera);
+})(performance.now());
 </script>
 </body>
 </html>
