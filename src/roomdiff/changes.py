@@ -72,13 +72,10 @@ def candidates(cloud: Cloud, state: np.ndarray, ev: Evidence, cfg: Config) -> li
     return out
 
 
-def assemble(
-    objs: list[Obj], pairs, before: list[Obj], after: list[Obj], cfg: Config
-) -> tuple[list[Change], list[Obj]]:
+def assemble(objs: list[Obj], pairs, cfg: Config) -> tuple[list[Change], list[Obj]]:
     """Turn verdicts and matches into reported changes; returns them and the objects dismissed on the way."""
     changes, dismissed, paired = [], [o for o in objs if o.status == "dismissed"], set()
-    for i, j, m in pairs:
-        a, b = before[i], after[j]
+    for a, b, m in pairs:
         paired |= {id(a), id(b)}
         if m.distance < cfg.min_move and (m.turn is None or abs(m.turn) < 15):
             # The same object in the same place: what looked like change was registration noise.

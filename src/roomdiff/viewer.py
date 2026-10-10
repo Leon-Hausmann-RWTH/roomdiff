@@ -12,6 +12,12 @@ def b64(a: np.ndarray) -> str:
     return base64.b64encode(np.ascontiguousarray(a).tobytes()).decode()
 
 
+def inside(xyz: np.ndarray, box: dict, margin: float) -> np.ndarray:
+    c, s = np.cos(box["yaw"]), np.sin(box["yaw"])
+    local = (xyz - box["center"]) @ np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])  # (M, 3) in the box's axes
+    return (np.abs(local) <= np.asarray(box["size"]) / 2 + margin).all(1)
+
+
 def write_viewer(
     path: Path,
     before: Cloud,
@@ -23,15 +29,21 @@ def write_viewer(
     max_points: int = 200_000,
 ) -> None:
     rng = np.random.default_rng(0)
+    # An object that left hid a surface the before video never saw. The after video saw it, so those after
+    # points (-2) fill the hole as the edits apply.
+    ids = [change_ids[0], change_ids[1].copy()]
+    for c in result["changes"]:
+        if c["box_before"] is not None:
+            ids[1][inside(after.xyz, c["box_before"], 0.05) & (ids[1] == -1)] = -2
     clouds = {}
-    for name, c, ids in (("before", before, change_ids[0]), ("after", after, change_ids[1])):
-        # Thin out only the unchanged points; object points are few and carry the result.
-        static = rng.permutation(np.nonzero(ids < 0)[0])[:max_points]
-        keep = np.sort(np.concatenate([static, np.nonzero(ids >= 0)[0]]))
+    for name, c, cid in (("before", before, ids[0]), ("after", after, ids[1])):
+        # Thin out only the unchanged points; object and revealed points are few and carry the result.
+        static = rng.permutation(np.nonzero(cid == -1)[0])[:max_points]
+        keep = np.sort(np.concatenate([static, np.nonzero(cid != -1)[0]]))
         clouds[name] = {
             "xyz": b64(c.xyz[keep].astype("<f4")),
             "rgb": b64(c.rgb[keep].astype("u1")),
-            "cid": b64(ids[keep].astype("<i2")),  # id in result["changes"], -1 unchanged
+            "cid": b64(cid[keep].astype("<i2")),  # id in result["changes"]; -1 unchanged, -2 revealed
         }
     cards = {
         c["id"]: {

@@ -196,7 +196,9 @@ function label(text, color, b, outlined) {
 
 const clouds = { before: split(DATA.clouds.before), after: split(DATA.clouds.after) };
 const statics = SIDES.map(s => clouds[s].get(-1));
-statics.forEach(p => scene.add(p));
+// After points on surfaces that a departed object hid in the before video.
+const revealed = clouds.after.get(-2);
+[...statics, revealed].filter(Boolean).forEach(p => scene.add(p));
 
 const items = R.changes.map(c => {
   const k = kindOf(c), color = STYLE[k][0], o = { c, k, color };
@@ -276,7 +278,8 @@ function moveTo(o, s) {
 function repaint() {
   painted = mode;
   const object = (o, side) => mode === 'Overlay' ? shaded(VIDEO[side]) : mode === 'Changes' ? shaded(o.color) : asIs;
-  statics.forEach((p, i) => paint(p, mode === 'Overlay' ? shaded(VIDEO[SIDES[i]]) : mode === 'Changes' ? dim : asIs));
+  const stat = side => mode === 'Overlay' ? shaded(VIDEO[side]) : mode === 'Changes' ? dim : asIs;
+  [[statics[0], 'before'], [statics[1], 'after'], [revealed, 'after']].forEach(([p, side]) => p && paint(p, stat(side)));
   items.forEach(o => SIDES.forEach(side => o[side] && o[side].pts && paint(o[side].pts, object(o, side))));
 }
 
@@ -285,6 +288,7 @@ function apply() {
   const s = edit, ghost = x => 0.2 + 0.8 * x;
   statics[0].visible = mode !== 'After';
   statics[1].visible = mode !== 'Before';
+  fade(revealed, mode === 'Before' ? s : 1);
   items.forEach(o => {
     const t = o.c.type, B = o.before, A = o.after;
     let pb = 1, eb = 1, pa = 1, ea = 1, show = [true, true];

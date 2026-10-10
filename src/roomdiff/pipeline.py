@@ -15,6 +15,7 @@ from .objects import Obj, describe, lift, merge, segment, verdict
 from .outputs import box_json, change_json, write_ply
 from .reconstruct import Recon, reconstruct, to_views
 from .report import write_cards, write_floorplan, write_report
+from .search import find_other_ends
 from .viewer import write_viewer
 from .world import Frame, transform, world_frame
 
@@ -76,8 +77,17 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
     describe(live, images, device)
     sides = [o for o in live if o.side == 0], [o for o in live if o.side == 1]
     pairs = match(*sides, (ca.xyz, cb.xyz), cfg)
-    changes, dismissed = assemble(objs, pairs, *sides, cfg)
-    print(f"changes: {len(changes)}, {len(pairs)} matched as moves ({time.time() - t:.1f} s)")
+    paired = {id(o) for p in pairs for o in p[:2]}
+    lonely = [o for o in live if o.status == "confirmed" and id(o) not in paired]
+    taken = [np.zeros(len(c.xyz), bool) for c in clouds]
+    for o in live:
+        taken[o.side][o.idx] = True
+    found = find_other_ends(lonely, clouds, states, views, images, taken, cfg, device)
+    changes, dismissed = assemble(objs, pairs + found, cfg)
+    print(
+        f"changes: {len(changes)}, {len(pairs)} matched as moves, {len(found)} found again unfilmed "
+        f"({time.time() - t:.1f} s)"
+    )
     return Result((before, after), recon, frame, views, clouds, states, changes, dismissed)
 
 

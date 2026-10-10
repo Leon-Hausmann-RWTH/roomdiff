@@ -95,5 +95,5 @@ def match(
         m = register(src, dst)
         if m.fit < cfg.min_fit:
             m = footprint_motion(src, dst)
-        pairs.append((int(i), int(j), m))
+        pairs.append((before[i], after[j], m))
     return pairs

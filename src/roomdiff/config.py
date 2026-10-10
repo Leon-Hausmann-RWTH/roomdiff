@@ -52,6 +52,8 @@ class Config:
     """Share of free points above which a mostly-still-there object counts as partly changed."""
     match_similarity: float = 0.5
     """Minimum DINOv2 cosine similarity for a disappeared and an appeared object to be one moved object."""
+    search_similarity: float = 0.5
+    """DINOv2 patch similarity needed to look for an unmatched object's other end in the other video."""
     min_fit: float = 0.3
     """Share of points that must align for the rigid fit of a move to be trusted."""
     min_move: float = 0.08
