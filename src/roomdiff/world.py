@@ -2,7 +2,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from .geometry import Views, backproject
+from .geometry import Views, backproject, rz
 
 
 @dataclass
@@ -38,8 +38,8 @@ def points_and_normals(views: Views, stride: int = 4) -> tuple[np.ndarray, np.nd
 
 
 def up_from_normals(c2w: np.ndarray, nrm: np.ndarray) -> np.ndarray:
-    """Up when the cameras barely turned: pitch is a rotation about the mean camera x axis, so search
-    that plane for the direction most surface normals share (floors and tables face up)."""
+    """Up when the cameras barely turned: the most common normal direction in the plane orthogonal to the
+    mean camera x axis."""
     x = c2w[:, :3, 0].mean(0)
     x /= np.linalg.norm(x)
     u0 = -c2w[:, :3, 1].mean(0)
@@ -57,50 +57,45 @@ def up_from_normals(c2w: np.ndarray, nrm: np.ndarray) -> np.ndarray:
 def world_frame(views_a: Views, views_b: Views) -> Frame:
     """Gravity from the camera axes, refined by the floor plane; yaw from the dominant wall direction."""
     c2w = np.concatenate([views_a.c2w, views_b.c2w])
-    # Handheld phones keep roll near zero, so every camera x axis is horizontal: up is the direction
-    # orthogonal to all of them. Unlike the mean camera y axis, this does not tilt with pitch.
     pts, nrm = (np.concatenate(x) for x in zip(points_and_normals(views_a), points_and_normals(views_b)))
+    # Up is orthogonal to every camera x axis, as handheld phones keep roll near zero.
     _, sv, vt = np.linalg.svd(c2w[:, :3, 0], full_matrices=False)
     turned = bool(sv[1] >= 0.15 * sv[0])
     up = vt[2] if turned else up_from_normals(c2w, nrm)
     up = up if up @ c2w[:, :3, 1].mean(0) < 0 else -up
     cams = c2w[:, :3, 3]
-    floor_found = False
-    floor_z = 0.0
-    for _ in range(2):
+    floor_found, floor_z = False, 0.0
+    for _ in range(2):  # the second pass refits with the up vector from the first floor plane
         R = rotation_between(up, np.array([0.0, 0, 1]))
-        z, nz, cz = pts @ R[2], nrm @ R[2], cams @ R[2]
-        level = np.abs(nz) > 0.9
-        # Handheld phones are 1 to 2 m above the floor; level surfaces far lower are reflections or the
-        # view through a window.
-        below = level & (z < np.median(cz) - 0.3) & (z > np.median(cz) - 2.5)
+        z, cz = pts @ R[2], cams @ R[2]
+        # Level points at heights a floor can have below a handheld phone.
+        below = (np.abs(nrm @ R[2]) > 0.9) & (z < np.median(cz) - 0.3) & (z > np.median(cz) - 2.5)
         if below.sum() < 500:
             break
         bins = np.arange(z[below].min(), z[below].max() + 0.02, 0.02)
         hist, edges = np.histogram(z[below], bins)
         significant = np.nonzero((hist >= 0.15 * hist.max()) & (hist >= 0.005 * below.sum()))[0]
-        # The floor is the lowest large horizontal plane; tables and beds sit above it.
+        # Floor height from the lowest well-filled bin, then up from a plane fit to the points there.
         h0 = edges[significant[0]] + 0.01
         near = below & (np.abs(z - h0) < 0.05)
-        centred = pts[near] - pts[near].mean(0)
-        normal = np.linalg.svd(centred, full_matrices=False)[2][2]
+        p0 = pts[near].mean(0)
+        normal = np.linalg.svd(pts[near] - p0, full_matrices=False)[2][2]
         up = normal if normal @ up > 0 else -normal
-        floor_z = float(pts[near].mean(0) @ (up / np.linalg.norm(up)))
+        floor_z = float(p0 @ (up / np.linalg.norm(up)))
         floor_found = True
     R = rotation_between(up, np.array([0.0, 0, 1]))
     if not floor_found:
         floor_z = float(np.percentile(pts @ R[2], 1))
+    # Yaw from the dominant wall direction modulo 90 degrees.
     walls = np.abs(nrm @ R[2]) < 0.3
     nw = nrm[walls] @ R.T
     theta = np.angle(np.exp(4j * np.arctan2(nw[:, 1], nw[:, 0])).sum()) / 4
-    Rz = np.array([[np.cos(-theta), -np.sin(-theta), 0], [np.sin(-theta), np.cos(-theta), 0], [0, 0, 1]])
-    R = Rz @ R
+    R = rz(-theta) @ R
     T = np.eye(4)
     T[:3, :3] = R
     xy = np.median(pts @ R.T, 0)
     T[:3, 3] = [-xy[0], -xy[1], -floor_z]
     cam_h = float(np.median(cams @ R[2] - floor_z))
-    # When a bed or desk fills the view its top can pass for the floor; a phone is held 1 to 2 m up.
     floor_found = floor_found and 0.9 < cam_h < 2.2
     return Frame(T=T.astype(np.float32), floor_found=floor_found, camera_height=cam_h, up_from_cameras=turned)
 

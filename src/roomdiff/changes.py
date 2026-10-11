@@ -32,16 +32,17 @@ class Change:
 
 
 def fit_box(xyz: np.ndarray) -> Box:
-    """Gravity-aligned box: yaw from the principal axis of the footprint, which stray points barely move."""
+    """Gravity-aligned box, yaw along the footprint's principal axis, extent from 2nd to 98th percentiles."""
     lo, hi = np.percentile(xyz, 2, 0), np.percentile(xyz, 98, 0)
-    xy = xyz[:, :2] - xyz[:, :2].mean(0)
-    evals, evecs = np.linalg.eigh(np.cov(xy.T) if len(xy) > 2 else np.eye(2))
+    mean_xy = xyz[:, :2].mean(0)
+    xy = xyz[:, :2] - mean_xy
+    _, evecs = np.linalg.eigh(np.cov(xy.T) if len(xy) > 2 else np.eye(2))
     yaw = float(np.arctan2(evecs[1, 1], evecs[0, 1]))
     c, s = np.cos(yaw), np.sin(yaw)
-    local = xy @ np.array([[c, -s], [s, c]])
+    rot = np.array([[c, -s], [s, c]])
+    local = xy @ rot
     llo, lhi = np.percentile(local, 2, 0), np.percentile(local, 98, 0)
-    mid = (llo + lhi) / 2
-    center_xy = xyz[:, :2].mean(0) + np.array([[c, -s], [s, c]]) @ mid
+    center_xy = mean_xy + rot @ ((llo + lhi) / 2)
     size = np.array([*(lhi - llo), hi[2] - lo[2]]).clip(0.02)
     return Box(np.array([*center_xy, (lo[2] + hi[2]) / 2]), size, yaw)
 
@@ -57,34 +58,27 @@ def candidates(cloud: Cloud, state: np.ndarray, ev: Evidence, cfg: Config) -> li
         idx = free[labels == lab]
         if len(idx) < cfg.min_cluster_points:
             continue
-        # Keyframes close together see almost the same ray, so one burst of bad depth or pose looks like
-        # many votes; on the tuning pairs most false candidates came from a single camera position.
         if np.mean(ev.free_views[idx] >= 2) < cfg.min_multiview:
             continue
+        # Below the floor, or only seen from far away.
         if np.percentile(cloud.xyz[idx, 2], 90) < -0.05 or np.median(cloud.depth[idx]) > cfg.max_depth:
             continue
         out.append(idx)
     return out
 
 
-def assemble(objs: list[Obj], pairs, cfg: Config) -> tuple[list[Change], list[Obj]]:
-    """Turn verdicts and matches into reported changes; returns them and the objects dismissed on the way."""
-    changes, dismissed, paired = [], [o for o in objs if o.status == "dismissed"], set()
+def assemble(objs: list[Obj], pairs, cfg: Config) -> list[Change]:
+    """Turn verdicts and matches into the reported changes."""
+    changes, paired = [], set()
     for a, b, m in pairs:
         paired |= {id(a), id(b)}
         if m.distance < cfg.min_move and (m.turn is None or abs(m.turn) < cfg.min_turn):
-            # The same object in the same place: what looked like change was registration noise.
-            a.reason = b.reason = f"matched itself in the other video, {m.distance * 100:.0f} cm away"
-            dismissed += [a, b]
-            continue
+            continue  # the same object in the same place
         lead = next(
             (o for o in (a, b) if o.status == "confirmed"), max((a, b), key=lambda o: o.shares["free"])
         )
-        status, reason = (
-            ("confirmed", lead.reason) if lead.status == "confirmed" else ("unverified", lead.reason)
-        )
-        # Where an object moved less than its own size, both ends overlap and each is only partly free;
-        # two partial ends plus a rigid fit are as good as one confirmed end.
+        status, reason = "confirmed" if lead.status == "confirmed" else "unverified", lead.reason
+        # Two partly free ends that align rigidly confirm the move.
         if a.status == b.status == "partial" and m.fit >= cfg.min_fit:
             status = "confirmed"
             reason = f"both ends are partly free and {100 * m.fit:.0f} % of its points align after the move"
@@ -99,4 +93,4 @@ def assemble(objs: list[Obj], pairs, cfg: Config) -> tuple[list[Change], list[Ob
     changes.sort(key=lambda c: (c.status != "confirmed", order[c.kind], -c.lead.shares["points"]))
     for k, c in enumerate(changes):
         c.id = k + 1
-    return changes, dismissed
+    return changes

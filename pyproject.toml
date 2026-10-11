@@ -24,6 +24,7 @@ roomdiff = "roomdiff.cli:main"
 [dependency-groups]
 dev = [
     "playwright>=1.63.0",
+    "pycocotools>=2.0.8",
     "pytest>=8",
     "ruff>=0.8",
 ]

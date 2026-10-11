@@ -71,9 +71,7 @@
      "height_m": 0.85
     }
    },
-   "height_m": 0.21,
    "floor_blocked_m2": null,
-   "check_from": null,
    "evidence": {
     "free": 0.64,
     "seen": 0.017,
@@ -117,9 +115,7 @@
      "height_m": 0.84
     }
    },
-   "height_m": 0.23,
    "floor_blocked_m2": null,
-   "check_from": null,
    "evidence": {
     "free": 0.612,
     "seen": 0.341,
@@ -163,9 +159,7 @@
      "height_m": 0.85
     }
    },
-   "height_m": 0.29,
    "floor_blocked_m2": null,
-   "check_from": null,
    "evidence": {
     "free": 1.0,
     "seen": 0.0,
@@ -182,13 +176,6 @@
  "coverage": {
   "checked": 0.725,
   "hidden": 0.095,
-  "unchecked_before": 0.1,
-  "unchecked_after": 0.079
- },
- "ledger": {
-  "confirmed": 0.958,
-  "unverified": 0.0,
-  "dismissed": 0.0,
-  "residual": 0.042
+  "unchecked": 0.18
  }
 }

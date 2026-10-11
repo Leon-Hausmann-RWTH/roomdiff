@@ -1,12 +1,12 @@
-"""Evaluation on SceneDiff pairs.
+"""Evaluation on the SceneDiff benchmark (huggingface.co/datasets/yuqun/SceneDiff, MIT), unpacked in data/.
 
-3D: ground-truth masks lifted into 3D with the run's own depth and poses, matched one-to-one to the
-reported changes. Also a naive baseline (nearest-neighbour differencing), the official SceneDiff
-mask export, and a negative control made of the two halves of one video.
+Scores the reported changes against the ground truth lifted into 3D, next to a naive baseline. Optionally
+exports masks for the official evaluator, or runs half-video negative controls instead of the pairs.
 
 Run from the repository root: uv run python scripts/evaluate.py --set tuning
 """
 
+import io
 import json
 import pickle
 from collections import defaultdict
@@ -17,7 +17,7 @@ import numpy as np
 import tyro
 from clips import reencode
 from PIL import Image
-from scenediff import load_gt, object_type, rle_decode, rle_encode, videos
+from pycocotools import mask as rle
 from scipy.ndimage import binary_erosion
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial import cKDTree
@@ -30,6 +30,7 @@ from roomdiff.objects import Obj, choose_mask, hires, sam_masks, splat, visible
 from roomdiff.pipeline import Result, analyse, write_outputs
 from roomdiff.video import probe
 
+DATA = Path("data/scenediff_benchmark/data")
 TUNING = [
     "living_room_1_living_room_2",
     "bedroom_2_bedroom_4",
@@ -43,16 +44,18 @@ REPORT = [
     "bedroom_10_bedroom_11", "bedroom_32_bedroom_33", "bedroom_36_bedroom_37", "office_1_office_2",
     "office_3_office_4", "lounge_11_lounge_12", "study_1_study_2", "recreation_room_1_recreation_room_2",
 ]  # fmt: skip
-SHOWCASE = ["living_room_17_living_room_18"]
-FLAT = 0.08  # objects lower than this (metres) are below what a depth test can see
+FLAT = 0.08  # metres; lower ground-truth objects count as flat
 COUNTS = ("pred", "tp", "pred_confirmed", "tp_confirmed", "type_ok", "tp_flat", "fp_unseen",
           "moves", "moves_placed")  # fmt: skip
+SAFE = {("builtins", n) for n in ("dict", "list", "tuple", "set", "str", "int", "float", "bool", "bytes")} | {
+    (m, n) for m in ("numpy.core.multiarray", "numpy._core.multiarray") for n in ("_reconstruct", "scalar")
+} | {("numpy", "ndarray"), ("numpy", "dtype")}  # fmt: skip
 
 
 @dataclass
 class Args:
     set: str = "tuning"
-    """tuning, report or showcase."""
+    """tuning or report."""
     pairs: tuple[str, ...] = ()
     """Explicit pair names; overrides --set."""
     out: Path = Path("runs/eval")
@@ -65,7 +68,30 @@ class Args:
     config: Config = field(default_factory=Config)
 
 
+class SafeUnpickler(pickle.Unpickler):
+    """Unpickler for downloaded files: loads only containers and numpy arrays."""
+
+    def find_class(self, module, name):
+        if (module, name) not in SAFE:
+            raise pickle.UnpicklingError(f"refusing {module}.{name}")
+        return super().find_class(module, name)
+
+
+def load_gt(pair: str) -> dict:
+    return SafeUnpickler(io.BytesIO((DATA / pair / "segments.pkl").read_bytes())).load()
+
+
+def videos(pair: str) -> tuple[Path, Path]:
+    found = sorted(p for p in (DATA / pair).iterdir() if p.name.startswith("original_video"))
+    return found[0], found[1]
+
+
+def object_type(obj: dict) -> str:
+    return "moved" if obj["in_video1"] and obj["in_video2"] else "removed" if obj["in_video1"] else "added"
+
+
 def scored_times(path: Path) -> tuple[float, ...]:
+    """Whole seconds into the video: the times of the frames SceneDiff scores."""
     duration = probe(path)[2]
     return tuple(float(k) for k in range(int(duration) + 1) if k <= duration - 0.02)
 
@@ -79,6 +105,7 @@ def scored_frames(res: Result, side: int) -> dict[int, int]:
 
 
 def to_recon(mask: np.ndarray, res: Result, side: int) -> np.ndarray:
+    """A source-resolution mask cropped and resized to the reconstruction's depth maps."""
     x0, y0, x1, y1 = res.recon.keys[side].crop
     h, w = res.views[side].depth.shape[1:]
     return np.asarray(Image.fromarray(mask[y0:y1, x0:x1]).resize((w, h), Image.Resampling.NEAREST))
@@ -86,16 +113,14 @@ def to_recon(mask: np.ndarray, res: Result, side: int) -> np.ndarray:
 
 def lift(gt: dict, res: Result, side: int) -> dict[int, np.ndarray]:
     """World points of each GT object, from the scored keyframes of one video."""
-    views, pts = res.views[side], defaultdict(list)
+    views, keys, pts = res.views[side], res.recon.keys[side], defaultdict(list)
     for k, i in scored_frames(res, side).items():
         world = backproject(views.depth[i], views.K[i], views.c2w[i])
         for oid, masks in gt[f"video{side + 1}_objects"].items():
+            # GT masks are keyed by frame index at 30 fps.
             if str(30 * k) in masks:
-                m = rle_decode(masks[str(30 * k)])
-                assert m.shape == tuple(res.recon.keys[side].source_hw), (
-                    m.shape,
-                    res.recon.keys[side].source_hw,
-                )
+                m = rle.decode(masks[str(30 * k)]).astype(bool)
+                assert m.shape == tuple(keys.source_hw), (m.shape, keys.source_hw)
                 m = binary_erosion(to_recon(m, res, side), iterations=1) & (views.depth[i] > 0)
                 pts[oid].append(world[m])
     return {o: np.concatenate(p) for o, p in pts.items() if sum(map(len, p)) >= 10}
@@ -107,9 +132,7 @@ def within(a: np.ndarray, b: np.ndarray, r: float = 0.05) -> np.ndarray:
 
 def match(preds: list[Change], objects: list[dict], gt_pts, res: Result):
     """One-to-one: a change matches a GT object if a quarter of its points lie within 5 cm of it.
-
-    Returns the matches and the per-end overlaps (2, changes, objects).
-    """
+    Returns the matches and the overlaps per end, (2, changes, objects)."""
     S = np.zeros((2, len(preds), len(objects)))
     for i, c in enumerate(preds):
         for j, o in enumerate(objects):
@@ -142,7 +165,7 @@ def score(preds: list[Change], objects: list[dict], gt_pts, res: Result) -> dict
             for r, c in placed
             if preds[r].motion is not None and objects[c].get("shift_m") is not None
         ],
-        # A false removal where the other video never looked is the error the evidence rule prevents.
+        # Ends of unmatched changes whose points the other video mostly saw in too few frames.
         "fp_unseen": sum(
             bool(np.mean(res.states[s][o.idx] == UNREACHED) > 0.5)
             for i, c in enumerate(preds)
@@ -154,37 +177,26 @@ def score(preds: list[Change], objects: list[dict], gt_pts, res: Result) -> dict
 
 
 def naive(res: Result, cfg: Config) -> list[Change]:
-    """Nearest-neighbour differencing as in VGGT-CD: a point changed if the other cloud has nothing within
-    5 cm. Same clustering, no evidence, no verdicts."""
+    """Nearest-neighbour differencing as in VGGT-CD: points with nothing of the other cloud within 5 cm,
+    clustered like roomdiff's candidates."""
     out = []
-    for s in (0, 1):
-        xyz, other = res.clouds[s].xyz, res.clouds[1 - s].xyz
-        lonely = np.nonzero(~within(xyz, other))[0]
+    for s, kind in ((0, "removed"), (1, "added")):
+        xyz = res.clouds[s].xyz
+        lonely = np.nonzero(~within(xyz, res.clouds[1 - s].xyz))[0]
         if len(lonely) == 0:
             continue
         labels = components(xyz[lonely], cfg.cluster_voxel)
         for lab in np.unique(labels):
             idx = lonely[labels == lab]
             if len(idx) >= cfg.min_cluster_points:
-                o = Obj(s, idx, idx)
-                out.append(
-                    Change(
-                        len(out) + 1,
-                        "removed" if s == 0 else "added",
-                        "confirmed",
-                        "",
-                        *((o, None) if s == 0 else (None, o)),
-                    )
-                )
+                ends = (Obj(s, idx, idx), None) if s == 0 else (None, Obj(s, idx, idx))
+                out.append(Change(len(out) + 1, kind, "confirmed", "", *ends))
     return out
 
 
 def export_official(res: Result, out: Path, device) -> None:
-    """object_masks.pkl for SceneDiff's evaluator: masks at the source resolution on its scored frames.
-
-    Projected 2 cm points leave holes, so each object is segmented again with SAM on every scored frame,
-    prompted with the projection of its points; the evaluator ranks objects by the mean 'cost'.
-    """
+    """Write object_masks.pkl for SceneDiff's evaluator: per change and scored frame, a SAM mask at the
+    source resolution, prompted with the change's projected points."""
     jobs, owners = {}, {}
     for c in res.changes:
         for s, o in ((0, c.before), (1, c.after)):
@@ -208,10 +220,9 @@ def export_official(res: Result, out: Path, device) -> None:
             full[y0:y1, x0:x1] = np.asarray(
                 Image.fromarray(m).resize((x1 - x0, y1 - y0), Image.Resampling.NEAREST)
             )
-            rle = rle_encode(full)
-            rle["counts"] = rle["counts"].encode()
-            cost = 1.0 if c.status == "confirmed" else 0.4
-            pred.setdefault(c.id, {}).setdefault(f"video_{s + 1}", {})[k] = {"mask": rle, "cost": cost}
+            code = rle.encode(np.asfortranarray(full.astype(np.uint8)))
+            cost = 1.0 if c.status == "confirmed" else 0.4  # the evaluator ranks objects by mean cost
+            pred.setdefault(c.id, {}).setdefault(f"video_{s + 1}", {})[k] = {"mask": code, "cost": cost}
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "object_masks.pkl", "wb") as f:
         pickle.dump(pred, f)
@@ -227,6 +238,7 @@ def evaluate_pair(pair: str, args: Args) -> dict:
         export_official(res, args.out / "official" / pair, pick_device(args.config.device))
     gt_pts = [lift(gt, res, 0), lift(gt, res, 1)]
 
+    # Share of decided points away from every GT object that came out free.
     static = []
     for s in (0, 1):
         cloud, state = res.clouds[s], res.states[s]
@@ -245,21 +257,16 @@ def evaluate_pair(pair: str, args: Args) -> dict:
         diag = {"id": oid, "label": obj["label"], "type": object_type(obj)}
         diag["height_m"] = round(float(np.percentile(z, 95) - np.percentile(z, 5)), 3)
         if len(sides) == 2:
-            diag["shift_m"] = round(
-                float(np.linalg.norm(np.subtract(*[np.median(gt_pts[s][oid], 0) for s in (1, 0)]))), 3
-            )
+            shift = np.median(gt_pts[1][oid], 0) - np.median(gt_pts[0][oid], 0)
+            diag["shift_m"] = round(float(np.linalg.norm(shift)), 3)
         for s in sides:
             d, j = cKDTree(res.clouds[s].xyz).query(gt_pts[s][oid], distance_upper_bound=0.03)
-            hit = d < 0.03
-            diag[f"free_{'ab'[s]}"] = round(
-                float(np.mean(res.states[s][j[hit]] == FREE)) if hit.any() else 0.0, 3
-            )
+            free = res.states[s][j[d < 0.03]] == FREE
+            diag[f"free_{'ab'[s]}"] = round(float(np.mean(free)) if free.size else 0.0, 3)
         objects.append(diag)
 
-    ours, base = (
-        score(res.changes, objects, gt_pts, res),
-        score(naive(res, args.config), objects, gt_pts, res),
-    )
+    ours = score(res.changes, objects, gt_pts, res)
+    base = score(naive(res, args.config), objects, gt_pts, res)
     changes = [{"id": c.id, "type": c.kind, "status": c.status, "reason": c.reason} for c in res.changes]
     flat = sum(o["height_m"] < FLAT for o in objects)
     return {"pair": pair, "gt": len(objects), "gt_flat": flat, "ours": ours, "naive": base,
@@ -267,14 +274,13 @@ def evaluate_pair(pair: str, args: Args) -> dict:
 
 
 def control_pair(pair: str, args: Args) -> dict:
-    # The two halves of one video show the same unchanged scene along two stretches of path.
+    """Negative control: the two halves of the pair's first video show the same unchanged room."""
     src, folder = videos(pair)[0], args.out / "control" / pair
-    a, b = (
-        reencode(src, folder / f"{n}.mp4", part=p) for n, p in (("first", (0, 0.5)), ("second", (0.5, 1)))
-    )
+    a = reencode(src, folder / "first.mp4", part=(0, 0.5))
+    b = reencode(src, folder / "second.mp4", part=(0.5, 1))
     res = analyse(a, b, args.config)
     if args.write:
-        write_outputs(res, args.out / "control" / pair / "out", args.config)
+        write_outputs(res, folder / "out", args.config)
     decided = [(s == FREE) | (s == SEEN) for s in res.states]
     return {
         "pair": pair,
@@ -289,9 +295,9 @@ def control_pair(pair: str, args: Args) -> dict:
 def summary(rows: list[dict]) -> dict:
     gt, flat = sum(r["gt"] for r in rows), sum(r["gt_flat"] for r in rows)
     out = {"pairs": len(rows), "gt_objects": gt, "gt_flat": flat}
-    errors = {who: [e for r in rows for e in r[who]["move_error_m"]] for who in ("ours", "naive")}
     for who in ("ours", "naive"):
         t = {k: sum(r[who][k] for r in rows) for k in COUNTS}
+        errors = [e for r in rows for e in r[who]["move_error_m"]]
         out[who] = {
             "recall": round(t["tp"] / max(gt, 1), 3),
             "precision": round(t["tp"] / max(t["pred"], 1), 3),
@@ -302,14 +308,14 @@ def summary(rows: list[dict]) -> dict:
             "type_accuracy": round(t["type_ok"] / max(t["tp"], 1), 3),
             "false_in_unseen_regions": t["fp_unseen"],
             "moves_placed": f"{t['moves_placed']} of {t['moves']}",
-            "median_move_error_m": round(float(np.median(errors[who])), 3) if errors[who] else None,
+            "median_move_error_m": round(float(np.median(errors)), 3) if errors else None,
         }  # fmt: skip
     out["static_false_free"] = round(float(np.mean([x for r in rows for x in r["static_false_free"]])), 4)
     return out
 
 
 def main(args: Args) -> None:
-    pairs = list(args.pairs) or {"tuning": TUNING, "report": REPORT, "showcase": SHOWCASE}[args.set]
+    pairs = list(args.pairs) or {"tuning": TUNING, "report": REPORT}[args.set]
     args.out.mkdir(parents=True, exist_ok=True)
     name = ("control_" if args.control else "") + (args.set if not args.pairs else "custom")
     rows = []

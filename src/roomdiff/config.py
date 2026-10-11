@@ -5,30 +5,26 @@ from pathlib import Path
 from typing import Literal
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
-# One printed line per stage; transformers' per-model progress bars and advisories drown them.
+# Hide transformers' progress bars and advisories.
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 import huggingface_hub  # noqa: E402
 import torch  # noqa: E402
 from transformers.utils import logging as transformers_logging  # noqa: E402
 
 transformers_logging.disable_progress_bar()
-# That also hides the download bars, and the first run fetches about 10 GB of weights.
+# Keep the bars for weight downloads.
 huggingface_hub.utils.enable_progress_bars()
 
 
 @dataclass(frozen=True)
 class Config:
-    """frames_per_video, device and cache_dir are the settings to change; the thresholds after them were
-    set on 4 validation pairs."""
-
     frames_per_video: int = 28
     """Keyframes per video for the joint reconstruction."""
     device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
     """auto picks cuda, then mps, then cpu."""
     cache_dir: Path = Path("cache")
-    """Where reconstructions are cached (about 28 MB per pair), so later stages rerun without the model."""
+    """Where reconstructions are cached, so later stages rerun without the model."""
     pixels_per_frame: int = 141_120
     """Pixel budget per keyframe (504 x 280 for 16:9)."""
     conf_threshold: float = 0.1
@@ -52,13 +48,11 @@ class Config:
     min_cluster_points: int = 20
     """Smallest candidate kept, in 2 cm points."""
     max_depth: float = 6.0
-    """Candidates seen from farther than this (metres) are outside the room: windows, mirrors."""
+    """Candidates with a median depth beyond this (metres) are dropped as outside the room."""
     viewpoint_spacing: float = 0.25
     """Cameras closer than this (metres) count as one viewpoint."""
     min_multiview: float = 0.3
     """Share of a candidate's points that cameras in at least two places must have looked through."""
-    max_frame_conflict: float = 0.3
-    """Keyframes whose pixels the rest of their own video looks through more often than this are dropped."""
     min_observed: float = 0.2
     """Share of an object's points the other video must decide on; below it the object is unverified."""
     confirm_ratio: float = 0.5
@@ -77,7 +71,7 @@ class Config:
     """Smallest turn in degrees that counts as a change and is reported in sentences."""
 
 
-def pick_device(name: str = "auto") -> torch.device:
+def pick_device(name: str) -> torch.device:
     if name != "auto":
         return torch.device(name)
     if torch.cuda.is_available():
@@ -88,7 +82,7 @@ def pick_device(name: str = "auto") -> torch.device:
 
 
 def free_device(device: torch.device) -> None:
-    # Models run one after another; return each one's memory before loading the next.
+    """Return a model's memory before the next model loads."""
     gc.collect()
     if device.type == "mps":
         torch.mps.empty_cache()

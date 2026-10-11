@@ -14,7 +14,6 @@ from .evidence import (
     SEEN,
     UNREACHED,
     count_evidence,
-    frame_conflicts,
     point_states,
     self_consistent,
 )
@@ -45,9 +44,8 @@ class Result:
     frame: Frame
     views: tuple[Views, Views]
     clouds: tuple[Cloud, Cloud]
-    states: tuple[np.ndarray, np.ndarray]  # per-point evidence state of each cloud against the other video
+    states: tuple[np.ndarray, np.ndarray]  # (N,) evidence state of each point against the other video
     changes: list[Change]
-    dismissed: list[Obj]
     warnings: list[str]
 
 
@@ -75,11 +73,6 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
         warn("no plausible floor plane: heights count from z = 0 (see frame); nothing is put on the floor")
 
     t = time.time()
-    for own, name in ((va, "before"), (vb, "after")):
-        bad = np.nonzero(frame_conflicts(own, cfg) > cfg.max_frame_conflict)[0]
-        own.depth[bad] = 0
-        if len(bad):
-            warn(f"dropped {name} keyframes {bad.tolist()}: the rest of the video contradicts them")
     clouds = []
     for own in (va, vb):
         c = cloud_from_views(own, cfg.voxel)
@@ -115,12 +108,12 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
     for o in live:
         taken[o.side][o.idx] = True
     found = find_other_ends(lonely, clouds, states, views, images, taken, cfg, device)
-    changes, dismissed = assemble(objs, pairs + found, cfg)
+    changes = assemble(objs, pairs + found, cfg)
     print(
         f"changes: {len(changes)}, {len(pairs)} matched as moves, {len(found)} more found in the other "
         f"video ({time.time() - t:.1f} s)"
     )
-    return Result((before, after), recon, frame, views, clouds, states, changes, dismissed, warnings)
+    return Result((before, after), recon, frame, views, clouds, states, changes, warnings)
 
 
 def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
@@ -128,15 +121,15 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     ca, cb = r.clouds
     images = (r.recon.keys[0].images, r.recon.keys[1].images)
-    times = (r.recon.keys[0].times, r.recon.keys[1].times)
-    name_changes(r.changes, r.clouds, r.states, r.views, images, times, r.frame.floor_found, cfg)
-    print(f"labels: SigLIP 2 names and sentences for {len(r.changes)} changes ({time.time() - t:.1f} s)")
-    t = time.time()
-    ids = [np.full(len(ca.xyz), -1, np.int16), np.full(len(cb.xyz), -1, np.int16)]
+    ids = [np.full(len(ca.xyz), -1, np.int16), np.full(len(cb.xyz), -1, np.int16)]  # change id per point
     for c in r.changes:
         for side, o in ((0, c.before), (1, c.after)):
             if o is not None:
                 ids[side][o.idx] = c.id
+    taken = [i >= 0 for i in ids]
+    name_changes(r.changes, r.clouds, r.states, taken, r.views, images, r.frame.floor_found, cfg)
+    print(f"labels: SigLIP 2 names and sentences for {len(r.changes)} changes ({time.time() - t:.1f} s)")
+    t = time.time()
     changes = [change_json(c, ca, cb) for c in r.changes]
     result = {
         "before": r.paths[0].name,
@@ -149,7 +142,6 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
         | {"unverified": sum(c.status == "unverified" for c in r.changes)},
         "changes": changes,
         "coverage": coverage(r.states),
-        "ledger": ledger(r),
     }
     objects = {
         c.id: tuple(None if o is None else r.clouds[s].xyz[o.idx] for s, o in ((0, c.before), (1, c.after)))
@@ -167,32 +159,7 @@ def write_outputs(r: Result, out: Path, cfg: Config) -> dict:
 
 
 def coverage(states: tuple[np.ndarray, np.ndarray]) -> dict:
-    """Shares of all surface points: checked by the other video (seen or free), hidden from it, or seen
-    by it in fewer than min_decisive frames. Hidden and unchecked points carry no information either way."""
-    total = sum(len(s) for s in states)
-    share = lambda keep: round(float(sum(int(keep(s).sum()) for s in states)) / total, 3)  # noqa: E731
-    out = {"checked": share(lambda s: np.isin(s, (SEEN, FREE))), "hidden": share(lambda s: s == OCCLUDED)}
-    return out | {
-        k: round(float((s == UNREACHED).sum()) / total, 3)
-        for k, s in zip(("unchecked_before", "unchecked_after"), states)
-    }
-
-
-def ledger(r: Result) -> dict:
-    """Where the evidence of absence went: every free point is counted once, in this order of buckets."""
-    free = [s == FREE for s in r.states]
-    total = max(sum(int(f.sum()) for f in free), 1)
-    claimed = [np.zeros(len(f), bool) for f in free]
-    buckets = {
-        "confirmed": [o for c in r.changes if c.status == "confirmed" for o in (c.before, c.after) if o],
-        "unverified": [o for c in r.changes if c.status == "unverified" for o in (c.before, c.after) if o],
-        "dismissed": r.dismissed,
-    }
-    out = {}
-    for name, objs in buckets.items():
-        hit = [np.zeros(len(f), bool) for f in free]
-        for o in objs:
-            hit[o.side][o.idx] = True
-        out[name] = round(sum(int((h & f & ~c).sum()) for h, f, c in zip(hit, free, claimed)) / total, 3)
-        claimed = [c | h for c, h in zip(claimed, hit)]
-    return out | {"residual": round(1 - sum(out.values()), 3)}
+    """Shares of all points the other video checked (seen or free), had hidden, or saw in too few frames."""
+    s = np.concatenate(states)
+    masks = {"checked": np.isin(s, (SEEN, FREE)), "hidden": s == OCCLUDED, "unchecked": s == UNREACHED}
+    return {k: round(float(m.mean()), 3) for k, m in masks.items()}

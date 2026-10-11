@@ -39,7 +39,7 @@ def patch_points(views: Views, rows: int, cols: int) -> np.ndarray:
 
 
 def descriptor(o: Obj, feats: np.ndarray) -> np.ndarray | None:
-    """Mean patch feature inside the object's masks; None if no mask covers most of a patch."""
+    """Unit mean feature of the patches over 40 % inside the object's masks, or None if there are none."""
     rows, cols = feats.shape[1:3]
     parts = [
         feats[i][sel].astype(np.float32).mean(0)
@@ -55,11 +55,8 @@ def descriptor(o: Obj, feats: np.ndarray) -> np.ndarray | None:
 def find_other_ends(
     lonely: list[Obj], clouds: tuple[Cloud, Cloud], states, views, images, taken, cfg: Config, device
 ) -> list[tuple[Obj, Obj, Motion]]:
-    """For a confirmed removal (or addition) with no partner, find the best appearance match in the other
-    video and keep it only if the first video saw that place empty. A move whose new place yields too
-    little free space for a candidate otherwise reads as a removal. Where the first video never looked,
-    appearance alone cannot tell the moved object from an unchanged twin, so such a match is dropped.
-    """
+    """Other end of each unpaired confirmed object: its best appearance match in the other video, kept
+    only where the first video saw that place empty."""
     if not lonely:
         return []
     feats = dense_features(images, device)
@@ -69,7 +66,7 @@ def find_other_ends(
         t, d = 1 - o.side, descriptor(o, feats[o.side])
         if d is None:
             continue
-        # Not where the object used to be, and not on anything already explained by another change.
+        # Skip the object's own place and points that belong to other changes.
         owned = np.full(pts[t].shape[:3], np.inf)
         if taken[t].any():
             owned = cKDTree(clouds[t].xyz[taken[t]]).query(
@@ -78,7 +75,7 @@ def find_other_ends(
         far = np.linalg.norm((pts[t] - clouds[o.side].xyz[o.idx].mean(0))[..., :2], axis=-1) > 0.4
         sim = np.where(far & ~np.isnan(pts[t][..., 0]) & (owned > 0.05), feats[t].astype(np.float32) @ d, -1)
         i, r, c = np.unravel_index(np.argmax(sim), sim.shape)
-        # The same place must look alike from several frames, not one lucky patch.
+        # At least two frames must show a similar patch at that place.
         near = np.linalg.norm(pts[t] - pts[t][i, r, c], axis=-1) < 0.15
         if (
             sim[i, r, c] < cfg.search_similarity
@@ -95,7 +92,7 @@ def find_other_ends(
     candidates = []
     for (t, i), results in sam_masks(prompts, images, device).items():
         for (o, px), (_, masks, _, _) in zip(owners[(t, i)], results):
-            # The smallest of SAM's three masks that holds the matched point: the object, not its shelf.
+            # The smallest of SAM's three masks that holds the matched point.
             hits = [k for k in masks if k[int(px[1]), int(px[0])]]
             if not hits:
                 continue
@@ -105,19 +102,19 @@ def find_other_ends(
             inside = np.nonzero(ok & mask[q[:, 1], q[:, 0]] & ~taken[t])[0]
             if len(inside) < cfg.min_cluster_points:
                 continue
-            # The first video must have looked through the place, by the same rule as verdict().
+            # The first video must have looked through the place (the rule of verdict()).
             st = states[t][body(inside, clouds[t])]
             decided = np.isin(st, (SEEN, FREE)).mean()
             if decided < cfg.min_observed or (st == SEEN).mean() >= (1 - cfg.confirm_ratio) * decided:
                 continue
             candidates.append((o, Obj(t, inside, inside, {i: mask})))
     embed([c for _, c in candidates], images, device)
-    found = []
+    found, xyz = [], (clouds[0].xyz, clouds[1].xyz)
     for o, cand in candidates:
         a, b = (o, cand) if o.side == 0 else (cand, o)
-        if (taken[cand.side][cand.idx]).any() or not same_kind(a, b, (clouds[0].xyz, clouds[1].xyz), cfg):
+        if taken[cand.side][cand.idx].any() or not same_kind(a, b, xyz, cfg):
             continue
-        motion = fit_move(a, b, (clouds[0].xyz, clouds[1].xyz), cfg)
+        motion = fit_move(a, b, xyz, cfg)
         if motion.distance < cfg.min_move:
             continue
         end, other = ("new", "before") if o.side == 0 else ("old", "after")

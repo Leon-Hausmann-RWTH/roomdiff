@@ -31,11 +31,11 @@ def check_video(path: Path, cfg: Config) -> list[str]:
         if not container.streams.video:
             raise SystemExit(f"no video stream in {path}")
         stream = container.streams.video[0]
-        # MKV, WebM and still images store no frame count; counting packets needs no decoding.
+        # Count packets where the container stores no frame count (MKV, WebM).
         frames = stream.frames or sum(1 for packet in container.demux(stream) if packet.size)
         if frames < cfg.frames_per_video:
             raise SystemExit(f"{path} has {frames} frames; {cfg.frames_per_video} keyframes are needed")
-        # PQ or HLG transfer: iPhones film HDR by default, and without tone mapping its colours wash out.
+        # 16 and 18 are the PQ and HLG transfer functions of HDR video.
         if stream.codec_context.color_trc in (16, 18):
             return [f"{path.name} is HDR video; record with HDR Video off for true colours"]
     return []

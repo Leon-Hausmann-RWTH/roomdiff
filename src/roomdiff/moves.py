@@ -5,6 +5,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial import cKDTree
 
 from .config import Config
+from .geometry import rz
 from .objects import Obj
 
 
@@ -21,13 +22,8 @@ class Motion:
         return float(np.linalg.norm(self.shift))
 
 
-def rz(yaw: float) -> np.ndarray:
-    c, s = np.cos(yaw), np.sin(yaw)
-    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-
-
 def solve_yaw(p: np.ndarray, q: np.ndarray) -> tuple[float, np.ndarray]:
-    """Least-squares yaw and translation mapping p onto q (rotation about z only: objects stay upright)."""
+    """Least-squares rotation about z and translation that map p onto q."""
     pc, qc = p.mean(0), q.mean(0)
     a, b = p[:, :2] - pc[:2], q[:, :2] - qc[:2]
     yaw = float(np.arctan2((a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]).sum(), (a * b).sum()))
@@ -35,11 +31,7 @@ def solve_yaw(p: np.ndarray, q: np.ndarray) -> tuple[float, np.ndarray]:
 
 
 def register(src: np.ndarray, dst: np.ndarray, inlier: float = 0.04, steps: int = 12) -> Motion:
-    """Trimmed point-to-point ICP over yaw and translation, started from a sweep of yaw angles.
-
-    The two ends of a move are often filmed from different sides, so the start angle matters;
-    the sweep makes the result independent of it.
-    """
+    """Trimmed point-to-point ICP over yaw and translation, started from a sweep of yaw angles."""
     tree = cKDTree(dst)
     results = []
     for yaw0 in np.linspace(0, 2 * np.pi, steps, endpoint=False):
@@ -52,8 +44,7 @@ def register(src: np.ndarray, dst: np.ndarray, inlier: float = 0.04, steps: int 
         results.append((float(np.mean(d < inlier)), float(np.angle(np.exp(1j * yaw))), t))
     fit = max(r[0] for r in results)
     good = [r for r in results if r[0] >= 0.9 * fit]
-    # A box fits equally well turned by 180 degrees; report the smallest turn that fits. If good fits
-    # spread beyond that symmetry (cylinder, square top) the turn cannot be measured.
+    # Smallest turn among the good fits; no turn if they disagree beyond 180-degree symmetry.
     _, yaw, t = min(good, key=lambda r: abs(np.angle(np.exp(1j * r[1]))))
     half_turns = np.array([r[1] for r in good]) % np.pi
     spread = np.abs(np.angle(np.exp(2j * (half_turns - yaw % np.pi)))).max() / 2
@@ -63,7 +54,7 @@ def register(src: np.ndarray, dst: np.ndarray, inlier: float = 0.04, steps: int 
 
 
 def footprint_motion(src: np.ndarray, dst: np.ndarray) -> Motion:
-    # Fallback when the two ends share too little surface to register: compare box centres, no turn.
+    """Fallback motion: shift between the 5 to 95 percentile box centres, no turn."""
     c0 = (np.percentile(src, 5, 0) + np.percentile(src, 95, 0)) / 2
     c1 = (np.percentile(dst, 5, 0) + np.percentile(dst, 95, 0)) / 2
     return Motion(0.0, c1 - c0, 0.0, c1 - c0, None)
@@ -84,11 +75,8 @@ def fit_move(a: Obj, b: Obj, xyz: tuple[np.ndarray, np.ndarray], cfg: Config) ->
 
 
 def match(before: list[Obj], after: list[Obj], xyz: tuple[np.ndarray, np.ndarray], cfg: Config) -> list:
-    """Pair disappeared with appeared objects: same appearance, compatible size, then a rigid fit.
-
-    A move is a removal and an addition of the same object (as in SceneDiff, REACT and 3DGS-CD).
-    Returns (before object, after object, Motion) triples.
-    """
+    """Pair removed with added objects by appearance and size (Hungarian), then fit each pair rigidly.
+    Returns (before, after, Motion) triples; a move as removal plus addition, as in SceneDiff and REACT."""
     if not before or not after:
         return []
     cost = np.full((len(before), len(after)), 9.0)

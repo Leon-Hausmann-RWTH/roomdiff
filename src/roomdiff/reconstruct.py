@@ -17,7 +17,7 @@ from .geometry import Views, depth_edges
 from .video import Keyframes, probe, recon_size, resize, select
 
 PI3X_REPO, PI3X_REVISION = "yyfz233/Pi3X", "bb1deea4d7423de5b30691739cb451a3f57dc1d5"
-ATTENTION_BLOCK = 8192  # query rows per attention call; keeps each GPU dispatch under the macOS watchdog
+ATTENTION_BLOCK = 8192  # query rows per attention call, to stay under the macOS GPU watchdog
 
 
 @dataclass
@@ -31,9 +31,9 @@ class Recon:
 
 
 def chunked_attention(sdpa, q, k, v, **kw):
+    """sdpa over blocks of ATTENTION_BLOCK query rows; exact, as softmax is per row."""
     if q.shape[-2] <= ATTENTION_BLOCK:
         return sdpa(q, k, v, **kw)
-    # Exact: softmax is computed per query row.
     return torch.cat(
         [
             sdpa(q[..., i : i + ATTENTION_BLOCK, :], k, v, **kw)
@@ -43,25 +43,25 @@ def chunked_attention(sdpa, q, k, v, **kw):
     )
 
 
-def chunked_encoder(forward, x, is_training=True):
-    # The DINOv2 encoder works per frame; chunks bound the memory of its explicit attention.
-    tokens = [forward(x[i : i + 8], is_training=True)["x_norm_patchtokens"] for i in range(0, len(x), 8)]
+def chunked_encoder(forward, x, **kw):
+    """Pi3's per-frame DINOv2 encoder over chunks of 8 frames, to bound the memory of its attention."""
+    tokens = [forward(x[i : i + 8], **kw)["x_norm_patchtokens"] for i in range(0, len(x), 8)]
     return {"x_norm_patchtokens": torch.cat(tokens)}
 
 
 def load_pi3x(device: torch.device):
-    # Pi3 prints a notice about its optional CUDA RoPE kernel on import; the PyTorch fallback is fine.
+    # Silences Pi3's import notice about its optional CUDA RoPE kernel.
     with contextlib.redirect_stdout(io.StringIO()):
         from pi3.models.pi3x import Pi3X
 
     path = hf_hub_download(PI3X_REPO, "model.safetensors", revision=PI3X_REVISION)
     with torch.device(device):
         model = Pi3X(use_multimodal=False)
-    names = set(model.state_dict())
     with safe_open(path, "pt", device=str(device)) as f:
-        state = {k: f.get_tensor(k) for k in names}
+        state = {k: f.get_tensor(k) for k in model.state_dict()}
     model.load_state_dict(state, assign=True)
     model.encoder.forward = functools.partial(chunked_encoder, model.encoder.forward)
+    # Run the point and confidence heads over 8 frames at a time (Pi3X's default is 64).
     model._chunked_conv_head = functools.partial(type(model)._chunked_conv_head, model, chunk_size=8)
     return model.eval()
 
@@ -71,7 +71,7 @@ def run_pi3x(images: np.ndarray, device: torch.device) -> dict[str, np.ndarray]:
     import pi3.models.layers.attention as pi3_attention
 
     x = torch.from_numpy(images).to(device).permute(0, 3, 1, 2).float().div(255)
-    # Pi3 imports scaled_dot_product_attention by name, so the patch must target its module.
+    # Patch Pi3's own module: it imports scaled_dot_product_attention by name.
     sdpa = functools.partial(chunked_attention, pi3_attention.scaled_dot_product_attention)
     with torch.no_grad(), mock.patch.object(pi3_attention, "scaled_dot_product_attention", sdpa):
         res = model(x[None])
@@ -82,8 +82,8 @@ def run_pi3x(images: np.ndarray, device: torch.device) -> dict[str, np.ndarray]:
 
 
 def fit_focal(local_points: np.ndarray, conf: np.ndarray) -> tuple[float, float]:
-    """One pinhole focal length (principal point at the centre) for a stack of point maps."""
-    n, h, w, _ = local_points.shape
+    """Focal length (principal point at the centre) for stacked point maps, and its median residual in px."""
+    h, w = local_points.shape[1:3]
     v, u = np.mgrid[0:h, 0:w]
     z = local_points[..., 2]
     ok = (conf > 0.5) & (z > 0)
@@ -96,6 +96,7 @@ def fit_focal(local_points: np.ndarray, conf: np.ndarray) -> tuple[float, float]
 
 
 def cache_key(paths, cfg: Config, required) -> str:
+    """Hash of each video's size, first and last MiB, and the settings the reconstruction depends on."""
     h = hashlib.sha1()
     for p in paths:
         size = p.stat().st_size
@@ -110,11 +111,11 @@ def cache_key(paths, cfg: Config, required) -> str:
 
 def reconstruct(path_a: Path, path_b: Path, cfg: Config, required=((), ())) -> Recon:
     t = time.time()
-    # One image size for both videos; if one is portrait and the other landscape, meet in the middle.
+    # One image size for both videos, at the geometric mean of their aspect ratios.
     w, h = recon_size(float(np.sqrt(probe(path_a)[0] * probe(path_b)[0])), cfg.pixels_per_frame)
     keys = tuple(select(p, cfg.frames_per_video, (w, h), req) for p, req in zip((path_a, path_b), required))
     print(f"keyframes: {len(keys[0].times)} + {len(keys[1].times)} at {w}x{h} ({time.time() - t:.0f} s)")
-    # Only geometry is cached; keyframes are re-decoded, which is deterministic and keeps the cache small.
+    # Only geometry is cached; keyframes are decoded on every run.
     cache = cfg.cache_dir / f"recon_{cache_key((path_a, path_b), cfg, required)}.npz"
     if cache.exists():
         z = np.load(cache)

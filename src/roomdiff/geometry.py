@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.ndimage import maximum_filter, minimum_filter
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
@@ -25,18 +26,19 @@ def subset(cloud: Cloud, keep: np.ndarray) -> Cloud:
     return Cloud(*(getattr(cloud, f)[keep] for f in cloud.__dataclass_fields__))
 
 
-def pixel_grid(h: int, w: int) -> np.ndarray:
-    v, u = np.mgrid[0:h, 0:w].astype(np.float32)
-    return np.stack([u, v], -1)  # (H, W, 2)
+def rz(yaw: float) -> np.ndarray:
+    c, s = np.cos(yaw), np.sin(yaw)
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
 
 
 def backproject(depth: np.ndarray, K: np.ndarray, c2w: np.ndarray) -> np.ndarray:
+    """(H, W, 3) world points of a depth map."""
     h, w = depth.shape
-    uv = pixel_grid(h, w)
-    x = (uv[..., 0] - K[0, 2]) / K[0, 0] * depth
-    y = (uv[..., 1] - K[1, 2]) / K[1, 1] * depth
+    v, u = np.mgrid[0:h, 0:w].astype(np.float32)
+    x = (u - K[0, 2]) / K[0, 0] * depth
+    y = (v - K[1, 2]) / K[1, 1] * depth
     cam = np.stack([x, y, depth], -1)
-    return cam @ c2w[:3, :3].T + c2w[:3, 3]  # (H, W, 3)
+    return cam @ c2w[:3, :3].T + c2w[:3, 3]
 
 
 def project(xyz: np.ndarray, K: np.ndarray, c2w: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -50,19 +52,18 @@ def project(xyz: np.ndarray, K: np.ndarray, c2w: np.ndarray) -> tuple[np.ndarray
 
 
 def depth_edges(depth: np.ndarray, rtol: float) -> np.ndarray:
-    # Flying pixels sit on depth discontinuities; drop them before they become fake surfaces.
-    pad = np.pad(depth, 1, mode="edge")
-    h, w = depth.shape
-    stack = np.stack([pad[dy : dy + h, dx : dx + w] for dy in range(3) for dx in range(3)])
-    return (stack.max(0) - stack.min(0)) > rtol * depth
+    """Mask of flying pixels: the 3x3 depth range exceeds rtol times the depth."""
+    return maximum_filter(depth, 3, mode="nearest") - minimum_filter(depth, 3, mode="nearest") > rtol * depth
 
 
 def pack_keys(cells: np.ndarray) -> np.ndarray:
+    """One int64 key per integer cell, 21 bits per axis."""
     c = cells.astype(np.int64) + (1 << 20)
     return (c[:, 0] << 42) | (c[:, 1] << 21) | c[:, 2]
 
 
 def cloud_from_views(views: Views, voxel: float) -> Cloud:
+    """All valid pixels of all frames, averaged per voxel."""
     xyz, rgb, dep = [], [], []
     for i in range(len(views.depth)):
         ok = views.depth[i] > 0
@@ -87,11 +88,11 @@ def cloud_from_views(views: Views, voxel: float) -> Cloud:
 def components(xyz: np.ndarray, cell: float) -> np.ndarray:
     """Label 26-connected groups of occupied cells; returns (M,) component id per point."""
     cells = np.floor(xyz / cell).astype(np.int64)
-    keys = pack_keys(cells)
-    uniq, inv = np.unique(keys, return_inverse=True)
-    ucells = cells[np.unique(inv, return_index=True)[1]]
+    uniq, first, inv = np.unique(pack_keys(cells), return_index=True, return_inverse=True)
+    ucells = cells[first]
     rows, cols = [], []
     offsets = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)]
+    # The graph is undirected, so the 13 offsets after (0, 0, 0) cover all 26 neighbours.
     for off in offsets[14:]:
         nb = pack_keys(ucells + np.array(off))
         j = np.searchsorted(uniq, nb).clip(0, len(uniq) - 1)

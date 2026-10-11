@@ -1,8 +1,8 @@
 # What changed in the room
 
 Between before.mp4 and after.mp4 roomdiff found 4 changes: 1 moved, 3 removed; 1 of them unverified.
-Unverified means not enough evidence either way: the other video saw too little of it, part of it is still there, or it is too flat to tell from the surface under it.
-The camera was held 1.49 m above the floor. Boxes and positions are in changes.json; its "frame" field gives the axes.
+Unverified: the evidence is not enough to decide; each entry says why.
+The camera was held 1.49 m above the floor. Positions and boxes are in changes.json.
 
 ![Top view of the changes](floorplan.png)
 
@@ -52,13 +52,10 @@ The beige shoe on the shelf (50 cm up) may have been removed.
 
 ## Coverage
 
-The other video checked 70 % of all surface points; 7 % were hidden from it. The other video saw the rest in fewer than three frames: 5 % from the before video and 17 % from the after video. The viewer tints them and the hidden points; the top view tints places where nothing was checked.
-
-The points the other video looked through belong to: 88 % confirmed changes, 2 % unverified changes, 8 % dismissed candidates and 3 % no candidate.
+The other video checked 70 % of the surface points. It had 7 % hidden and saw 22 % in fewer than three frames; the viewer can tint both.
 
 ## Method
 
-Both videos were reconstructed in one pass into a shared metric frame with z up. A surface counts as removed
-or added only where the other video looked through the place it occupied. Each change keeps the share of its
-points that the other video looked through, saw as a surface, had hidden behind something nearer, or saw in
-fewer than three frames (too few views).
+Both videos are reconstructed together in one metric frame. A surface counts as removed or added only where
+the other video looked through the place it occupied. Each change lists how many of its points the other video
+looked through, saw as a surface, had hidden, or saw too rarely to decide.

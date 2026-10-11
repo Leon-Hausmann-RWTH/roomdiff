@@ -4,7 +4,7 @@ import numpy as np
 from scipy.ndimage import maximum_filter, minimum_filter
 
 from .config import Config
-from .geometry import Views, backproject, project
+from .geometry import Views, project
 
 SEEN, FREE, OCCLUDED, UNREACHED = 0, 1, 2, 3
 
@@ -28,18 +28,12 @@ def viewpoints(views: Views, spacing: float) -> np.ndarray:
         else:
             bins[i] = len(anchors)
             anchors.append(c)
-    return bins % 63
+    return bins % 63  # each bin is one bit of an int64 mask
 
 
-def count_evidence(
-    xyz: np.ndarray, src_depth: np.ndarray, views: Views, cfg: Config, skip: int | None = None
-) -> Evidence:
-    """Test every point against every frame of a video along that frame's line of sight.
-
-    The per-pixel test is the one in SceneDiff's foreground_distance (Wu et al., arXiv 2512.16908) and the
-    ray reasoning of Fehr et al. (ICRA 2017) and Khronos (Schmid et al., RSS 2024); here the votes
-    are counted over all frames and camera positions instead of averaged per pixel.
-    """
+def count_evidence(xyz: np.ndarray, src_depth: np.ndarray, views: Views, cfg: Config) -> Evidence:
+    """Count per point the frames that see it, look through it or hide it behind a nearer surface.
+    Ray test as in SceneDiff's foreground_distance, Fehr et al. and Khronos."""
     m = len(xyz)
     seen, free, occ = (np.zeros(m, np.int16) for _ in range(3))
     free_bits = np.zeros(m, np.int64)
@@ -48,12 +42,9 @@ def count_evidence(
     r = cfg.window
     size = 2 * r + 1
     for i in range(n):
-        if i == skip:
-            continue
         d = views.depth[i]
         invalid = d <= 0
-        # Free or occluded needs the whole window to agree, which absorbs a few pixels of registration
-        # error at outlines; a window touching invalid depth stays undecided.
+        # Free or occluded only if the whole window agrees; a window touching invalid depth stays undecided.
         nearest = minimum_filter(np.where(invalid, np.inf, d), size)
         farthest = maximum_filter(np.where(invalid, -np.inf, d), size)
         holes = maximum_filter(invalid, size)
@@ -63,8 +54,7 @@ def count_evidence(
         ui, vi, zk = ui[idx], vi[idx], z[idx]
         ok = ~invalid[vi, ui]
         idx, ui, vi, zk = idx[ok], ui[ok], vi[ok], zk[ok]
-        # A far-away source view is noisier than a close check, so the band follows the larger depth.
-        tau = cfg.tau_abs + cfg.tau_rel * np.maximum(zk, src_depth[idx])
+        tau = cfg.tau_abs + cfg.tau_rel * np.maximum(zk, src_depth[idx])  # depth tolerance, metres
         decided = ~holes[vi, ui]
         is_free = decided & (nearest[vi, ui] > zk + tau)
         free[idx[is_free]] += 1
@@ -75,10 +65,11 @@ def count_evidence(
 
 
 def point_states(ev: Evidence, cfg: Config) -> np.ndarray:
+    """One state per point from its votes; the free-share rule follows Khronos."""
     decisive = ev.seen + ev.free
-    # A verdict needs several decisive frames; the 60 % share follows Khronos' absence rule.
     enough = decisive >= cfg.min_decisive
     state = np.full(len(decisive), UNREACHED, np.int8)
+    # Hidden only without a verdict: blocked at least once and at least as often as decided.
     state[~enough & (ev.occluded >= np.maximum(1, decisive))] = OCCLUDED
     state[enough] = SEEN
     state[enough & (ev.free >= cfg.free_ratio * decisive)] = FREE
@@ -86,28 +77,6 @@ def point_states(ev: Evidence, cfg: Config) -> np.ndarray:
 
 
 def self_consistent(xyz: np.ndarray, src_depth: np.ndarray, own: Views, cfg: Config) -> np.ndarray:
-    # A point its own video looks through is a flying pixel, hallucinated geometry or something
-    # that moved during the recording; none of these should count as a surface.
+    """False for points their own video looks through: flying pixels or things that moved while filming."""
     ev = count_evidence(xyz, src_depth, own, cfg)
     return ev.free < np.maximum(2, ev.seen)
-
-
-def frame_conflicts(views: Views, cfg: Config, stride: int = 6) -> np.ndarray:
-    """Per keyframe, the share of its pixels that the rest of its own video looks through.
-
-    A keyframe whose pose or depth is off contradicts its neighbours; left in, a run of such frames
-    alone can create or erase evidence against the other video.
-    """
-    scores = np.zeros(len(views.depth))
-    for i in range(len(views.depth)):
-        d = views.depth[i][::stride, ::stride]
-        ok = d > 0
-        if ok.sum() < 50:
-            scores[i] = 1.0
-            continue
-        sub = views.K[i].copy()
-        sub[:2] /= stride
-        xyz = backproject(d, sub, views.c2w[i])[ok]
-        ev = count_evidence(xyz, d[ok], views, cfg, skip=i)
-        scores[i] = float(np.mean(ev.free >= np.maximum(2, ev.seen)))
-    return scores

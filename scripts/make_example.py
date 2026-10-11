@@ -1,12 +1,8 @@
-"""Rebuild a committed example and the README media from two videos.
+"""Turn a video pair into a committed example: examples/<name>/, docs/<name>.html and the README media.
 
-Writes examples/<name>/{before.mp4, after.mp4} (small upright copies), examples/<name>/output/ (the
-normal run on those copies), the viewer for GitHub Pages at docs/<name>.html and docs/media/. With
---docs (the default) it becomes the main example: docs/index.html opens its viewer, and the GIF, top
-view and evidence figure in the README show it. Needs Playwright's browser once:
-uv run playwright install chromium.
+Needs Playwright's browser once: uv run playwright install chromium.
 
-    uv run python scripts/make_example.py before.mov after.mov --name my_room
+    uv run python scripts/make_example.py before.MOV after.MOV --name my_room
 """
 
 import io
@@ -27,6 +23,7 @@ from roomdiff.evidence import FREE, OCCLUDED, SEEN, UNREACHED
 from roomdiff.pipeline import Result, analyse, write_outputs
 from roomdiff.report import COLORS, corners, font, kind, place_tag, ring
 
+# Software WebGL for headless Chromium.
 GL = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 SET_SLIDER = (
     "t => { const e = document.getElementById('edit'); e.value = t; e.dispatchEvent(new Event('input')); }"
@@ -40,7 +37,7 @@ class Args:
     name: str
     """Folder name under examples/."""
     docs: bool = True
-    """Make this the main example: docs/index.html, the GIF and the floor plan in the README."""
+    """Make this the main example: docs/index.html and the README media."""
     config: Config = field(default_factory=Config)
 
 
@@ -54,7 +51,7 @@ def slider_gif(viewer: Path, path: Path, frames: int = 40) -> None:
         page.wait_for_timeout(2500)
         page.get_by_role("button", name="Before", exact=True).click()
         page.locator("#showUnchecked").uncheck()
-        # Closer than the default overview, turning slowly enough that the edits stay in view.
+        # Zoom in from the default overview and turn slowly.
         page.evaluate("camera.position.lerp(controls.target, 0.4)")
         page.evaluate("controls.autoRotate = true; controls.autoRotateSpeed = 0.25")
         for k in range(frames):
@@ -73,12 +70,11 @@ def slider_gif(viewer: Path, path: Path, frames: int = 40) -> None:
 
 
 def card_strip(output: Path, result: dict, path: Path, n: int = 3) -> None:
-    """Before and after cards of the first changes side by side: the evidence at a glance."""
+    """Before and after cards side by side, one row for each of the first n changes that have both."""
     rows = []
     for c in [c for c in result["changes"] if all(c["cards"].values())][:n]:
         pair = [Image.open(output / c["cards"][side]) for side in ("before", "after")]
-        h = 300
-        pair = [im.resize((round(im.width * h / im.height), h)) for im in pair]
+        pair = [im.resize((round(im.width * 300 / im.height), 300)) for im in pair]
         rows.append(np.concatenate([np.asarray(im) for im in pair], 1))
     if not rows:
         print("no change with both cards; no card strip written")
@@ -88,7 +84,7 @@ def card_strip(output: Path, result: dict, path: Path, n: int = 3) -> None:
     Image.fromarray(np.concatenate(rows)).save(path, quality=85)
 
 
-# GitHub Pages serves docs/index.html at the site root; it forwards to the main example's viewer.
+# docs/index.html, the GitHub Pages root, forwards to the main example's viewer.
 INDEX = """<!doctype html>
 <meta charset="utf-8">
 <title>roomdiff</title>
@@ -97,7 +93,7 @@ INDEX = """<!doctype html>
 """
 
 
-# What the ray test says about a region that nearest-neighbour differencing would report as a change.
+# Ray-test state, colour and legend text of the evidence figure.
 VERDICTS = [
     (FREE, (29, 29, 31), "looked through by the other video"),
     (OCCLUDED, (150, 120, 230), "hidden from the other video"),
@@ -161,7 +157,7 @@ def evidence_figure(res: Result, result: dict, cfg: Config, path: Path) -> None:
 
 
 def main(args: Args) -> None:
-    # The same input checks as the CLI, on the original files: the copies lose the HDR tag.
+    # The CLI's input checks, on the original files (the copies lose the HDR tag).
     notes = [n for p in (args.before, args.after) for n in check_video(p, args.config)]
     root = Path("examples") / args.name
     before = reencode(args.before, root / "before.mp4")
@@ -172,12 +168,12 @@ def main(args: Args) -> None:
     result = write_outputs(res, output, args.config)
     media = Path("docs/media")
     if args.docs:
-        # The GIF first: it needs the browser, and a missing one should fail before docs/ changes.
+        # The GIF first, so a missing browser fails before docs/ changes.
         slider_gif(output / "viewer.html", media / "edit_slider.gif")
         Image.open(output / "floorplan.png").save(media / "floorplan.png")
         evidence_figure(res, result, args.config, media / "evidence_example.png")
         Path("docs/index.html").write_text(INDEX.format(name=args.name))
-    card_strip(output, result, media / f"cards_{args.name}.jpg")
+        card_strip(output, result, media / "cards.jpg")
     shutil.copy(output / "viewer.html", f"docs/{args.name}.html")
 
 

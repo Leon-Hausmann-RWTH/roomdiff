@@ -4,13 +4,13 @@ import av
 import numpy as np
 
 
-def reencode(src: Path, dst: Path, long_side: int = 1280, part: tuple[float, float] = (0.0, 1.0)) -> Path:
-    """Upright H.264 copy of (a stretch of) a video, at most long_side pixels, no audio. Streams frames."""
+def reencode(src: Path, dst: Path, part: tuple[float, float] = (0.0, 1.0)) -> Path:
+    """Upright H.264 copy of a video or of its fraction `part`, long side at most 1280 px, no audio."""
     with av.open(str(src)) as container:
         n = sum(1 for _ in container.decode(video=0))
     first, last = int(part[0] * n), int(part[1] * n)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    # Write beside the target and move it into place, so src == dst cannot truncate the input.
+    # Write to a temporary file first, so src == dst works.
     tmp = dst.with_name(dst.stem + ".part.mp4")
     with av.open(str(src)) as container, av.open(str(tmp), "w") as out:
         stream = container.streams.video[0]
@@ -18,7 +18,7 @@ def reencode(src: Path, dst: Path, long_side: int = 1280, part: tuple[float, flo
         for i, f in enumerate(container.decode(stream)):
             if not first <= i < last:
                 continue
-            s = min(1.0, long_side / max(f.width, f.height))
+            s = min(1.0, 1280 / max(f.width, f.height))
             img = f.to_ndarray(
                 width=2 * round(f.width * s / 2), height=2 * round(f.height * s / 2), format="rgb24"
             )

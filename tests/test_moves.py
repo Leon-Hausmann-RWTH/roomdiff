@@ -1,6 +1,7 @@
 import numpy as np
 
-from roomdiff.moves import register, rz
+from roomdiff.geometry import rz
+from roomdiff.moves import register
 
 
 def box_surface(size, n=3000, seed=0):
@@ -26,7 +27,7 @@ def test_partial_views_of_the_two_ends():
     src = full[full[:, 1] < 0]
     dst = full @ rz(np.radians(-25)).T + [0.3, 0, 0]
     m = register(src, dst)
-    # Half a box slides onto the whole box at several angles; a wrong turn must never be reported.
+    # Half a box fits the whole box at several turns; a wrong turn must never be reported.
     assert m.turn is None or abs(m.turn + 25) < 4
     assert 0.15 < m.distance < 0.6
 

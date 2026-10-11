@@ -17,7 +17,7 @@ class Keyframes:
 
 
 def upright_frames(path: Path, long_side: int, keep=None):
-    """Yield (index, time, upright RGB frame scaled to long_side) without holding the video in memory."""
+    """Yield (time, upright RGB frame scaled to long_side) without holding the video in memory."""
     with av.open(str(path)) as container:
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
@@ -30,8 +30,8 @@ def upright_frames(path: Path, long_side: int, keep=None):
             img = frame.to_ndarray(
                 width=round(frame.width * s), height=round(frame.height * s), format="rgb24"
             )
-            # iPhones store portrait video as landscape plus a display rotation; honour it.
-            yield i, frame.time - t0, np.ascontiguousarray(np.rot90(img, k=round(frame.rotation / 90)))
+            # Apply the display rotation; iPhones store portrait video as landscape.
+            yield frame.time - t0, np.ascontiguousarray(np.rot90(img, k=round(frame.rotation / 90)))
 
 
 def probe(path: Path) -> tuple[float, tuple[int, int], float]:
@@ -67,9 +67,9 @@ def recon_size(aspect: float, pixels: int) -> tuple[int, int]:
 
 
 def select(path: Path, n: int, size: tuple[int, int], required_times=()) -> Keyframes:
-    """n keyframes: the frame nearest each required time, and the sharpest frame in each remaining window."""
+    """Keyframes: the frame nearest each required time, then the sharpest of n equal windows that lack one."""
     times, sharp = [], []
-    for _, t, img in upright_frames(path, 320):
+    for t, img in upright_frames(path, 320):
         times.append(t)
         sharp.append(laplace(img.mean(-1)).var())
     times, sharp = np.array(times), np.array(sharp)
@@ -79,10 +79,10 @@ def select(path: Path, n: int, size: tuple[int, int], required_times=()) -> Keyf
             picked.add(int(win[np.argmax(sharp[win])]))
     keep = sorted(picked)
     w, h = size
-    _, source_hw, _ = probe(path)
-    frames = [img for _, _, img in upright_frames(path, 2 * max(w, h) * 1.25, set(keep))]
+    source_hw = probe(path)[1]
+    frames = [img for _, img in upright_frames(path, 2 * max(w, h) * 1.25, set(keep))]
     fh, fw = frames[0].shape[:2]
-    # Centre-crop to the reconstruction aspect so both videos share one image size.
+    # Centre-crop to the reconstruction aspect ratio.
     cw, ch = (round(fh * w / h), fh) if fw / fh > w / h else (fw, round(fw * h / w))
     x0, y0 = (fw - cw) // 2, (fh - ch) // 2
     images = np.stack(

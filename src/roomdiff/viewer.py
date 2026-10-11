@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .geometry import Cloud
+from .geometry import Cloud, rz
 
 
 def b64(a: np.ndarray) -> str:
@@ -13,8 +13,7 @@ def b64(a: np.ndarray) -> str:
 
 
 def inside(xyz: np.ndarray, box: dict, margin: float) -> np.ndarray:
-    c, s = np.cos(box["yaw"]), np.sin(box["yaw"])
-    local = (xyz - box["center"]) @ np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])  # (M, 3) in the box's axes
+    local = (xyz - box["center"]) @ rz(box["yaw"])  # (M, 3) in the box's axes
     return (np.abs(local) <= np.asarray(box["size"]) / 2 + margin).all(1)
 
 
@@ -27,25 +26,23 @@ def write_viewer(
     result: dict,
     cards_dir: Path,
     cameras: tuple[np.ndarray, np.ndarray],
-    max_points: int = 200_000,
 ) -> None:
     rng = np.random.default_rng(0)
-    # An object that left hid a surface the before video never saw. The after video saw it, so those after
-    # points (-2) fill the hole as the edits apply.
+    # After points inside an old box (-2) fill the hole the object leaves in the before cloud.
     ids = [change_ids[0], change_ids[1].copy()]
     for c in result["changes"]:
         if c["box_before"] is not None:
             ids[1][inside(after.xyz, c["box_before"], 0.05) & (ids[1] == -1)] = -2
     clouds = {}
-    for name, c, cid, state in (("before", before, ids[0], states[0]), ("after", after, ids[1], states[1])):
-        # Thin out only the unchanged points; object and revealed points are few and carry the result.
-        static = rng.permutation(np.nonzero(cid == -1)[0])[:max_points]
+    for name, c, cid, state in zip(("before", "after"), (before, after), ids, states):
+        # Keep all changed and revealed points and at most 200,000 unchanged ones.
+        static = rng.permutation(np.nonzero(cid == -1)[0])[:200_000]
         keep = np.sort(np.concatenate([static, np.nonzero(cid != -1)[0]]))
         clouds[name] = {
             "xyz": b64(c.xyz[keep].astype("<f4")),
             "rgb": b64(c.rgb[keep].astype("u1")),
-            "cid": b64(cid[keep].astype("<i2")),  # id in result["changes"]; -1 unchanged, -2 revealed
-            "st": b64(state[keep].astype("u1")),  # evidence state against the other video, as in evidence.py
+            "cid": b64(cid[keep].astype("<i2")),  # change id; -1 unchanged, -2 revealed
+            "st": b64(state[keep].astype("u1")),  # evidence state, as in evidence.py
         }
     cards = {
         c["id"]: {
@@ -72,6 +69,6 @@ def write_viewer(
     html = (assets / "viewer.html").read_text()
     html = html.replace("/*THREE*/", (assets / "three.min.js").read_text())
     html = html.replace("/*ORBIT*/", (assets / "OrbitControls.js").read_text())
-    # A "</script>" inside a label or sentence would end the script block early.
+    # Escape "</" so no label or sentence can close the script tag.
     html = html.replace("/*DATA*/", json.dumps(payload).replace("</", "<\\/"))
     path.write_text(html)

@@ -6,7 +6,7 @@
 <title>roomdiff viewer</title>
 <style>
   :root { --bg: #f6f5f2; --panel: #fff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e2e0db;
-          --unverified: #8A8A8A; --before: #009E73; --after: #E69F00; }
+          --unverified: #8A8A8A; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
                font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -68,7 +68,7 @@
   <div id="panel">
     <h1>What changed in the room</h1>
     <p class="sub" id="summary"></p>
-    <p class="sub" id="define">Unverified means not enough evidence either way: the other video saw too little of it, part of it is still there, or it is too flat to tell from the surface under it.</p>
+    <p class="sub" id="define">Unverified: the evidence is not enough to decide; each entry says why.</p>
     <div class="modes" id="modes"></div>
     <div class="hint" id="hint"></div>
     <div class="edit">
@@ -76,11 +76,10 @@
       <input id="edit" type="range" min="0" max="1" step="0.01" value="0" aria-label="Share of the detected edits applied to the before scene">
       <span id="editval">0 %</span>
     </div>
-    <div class="hint">Slider: the confirmed edits applied to the before scene, from none to all; unverified ones stay as filmed.</div>
+    <div class="hint">The slider applies the confirmed edits to the before scene.</div>
     <div class="toggles">
       <label><input type="checkbox" id="showUnchecked"> areas not checked</label>
       <label><input type="checkbox" id="showPaths"> camera paths</label>
-      <label><input type="checkbox" id="showFilm"> where to film next</label>
     </div>
     <h2>Changes</h2>
     <div id="list"></div>
@@ -101,10 +100,9 @@ const HINTS = {
   Before: 'Before video in its own colours. Move the slider to apply the detected edits.',
   After: 'After video in its own colours. Boxes without points mark places that are now empty.',
   Overlay: 'Both videos: before in green, after in amber.',
-  Changes: 'Unchanged points in grey, changed objects in the colour of their change; the old place of a moved object is pale.',
+  Changes: 'Unchanged points in grey, changes in colour. The old place of a moved object is pale.',
 };
-const kindOf = c => c.status === 'unverified' ? 'unverified' : c.type;
-// Halves round to even as in Python, so the panel prints the same numbers as report.md and the reasons.
+// Round halves to even, as Python does.
 const round = v => { const r = Math.round(v); return r - v === 0.5 && r % 2 ? r - 1 : r; };
 const pct = x => round(100 * x) + ' %';
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
@@ -133,12 +131,11 @@ function points(xyz, rgb, st, size) {
   g.setAttribute('position', new THREE.BufferAttribute(xyz, 3));
   g.setAttribute('color', new THREE.BufferAttribute(rgb.slice(), 3));
   const p = new THREE.Points(g, new THREE.PointsMaterial({ size, vertexColors: true, transparent: true }));
-  p.userData.rgb = rgb;
-  p.userData.st = st;
+  p.userData = { rgb, st };
   return p;
 }
 
-// One point set for the unchanged points of a video and one per change id, so each can fade or move on its own.
+// Split a video's points into one point set per change id (-1 unchanged, -2 revealed).
 function split(part) {
   const xyz = decode(part.xyz, Float32Array), rgb = decode(part.rgb, Uint8Array), cid = decode(part.cid, Int16Array);
   const st = decode(part.st, Uint8Array);
@@ -148,15 +145,12 @@ function split(part) {
   groups.forEach((idx, id) => {
     const p = new Float32Array(idx.length * 3), c = new Float32Array(idx.length * 3), s = Uint8Array.from(idx, i => st[i]);
     idx.forEach((i, j) => { for (let k = 0; k < 3; k++) { p[3 * j + k] = xyz[3 * i + k]; c[3 * j + k] = rgb[3 * i + k] / 255; } });
-    // Three.js scales point size by half the view height, not the focal length; 0.04 covers a 2 cm voxel at 50 degrees.
     out.set(id, points(p, c, s, id < 0 ? 0.036 : 0.044));
   });
   return out;
 }
 
-// Points the other video could not check: seen in fewer than three of its frames (per video, as in the top view),
-// or hidden from it behind something nearer.
-// In Overlay the points already carry the video colours, so there the tint is one light grey.
+// Tints for points the other video saw in fewer than three frames (per video) or had hidden; one grey in Overlay.
 const UNCHECKED = { before: [0.42, 0.8, 0.66], after: [0.96, 0.74, 0.3] }, HIDDEN = [0.66, 0.56, 0.92];
 const unchecked = side => mode === 'Overlay' ? [0.85, 0.85, 0.85] : UNCHECKED[side];
 function paint(p, f, tint, side) {
@@ -185,17 +179,14 @@ function fill(b, color, opacity) {
   const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
   return place(new THREE.Mesh(new THREE.BoxGeometry(...b.size), mat), b);
 }
-// A tag that keeps its size on screen and stays visible through points, sitting on top of its box.
-// Ghost cameras get an outlined tag so they do not read as changes.
-function label(text, color, b, outlined) {
+// A tag on top of the box that keeps its size on screen and draws over the points.
+function label(text, color, b) {
   const cv = document.createElement('canvas'), ctx = cv.getContext('2d'), font = 'bold 40px -apple-system, "Segoe UI", Roboto, sans-serif';
   ctx.font = font;
   cv.width = Math.ceil(ctx.measureText(text).width) + 28; cv.height = 60;
-  ctx.font = font; ctx.fillStyle = outlined ? 'rgba(255, 255, 255, 0.9)' : color; ctx.strokeStyle = color; ctx.lineWidth = 4;
-  ctx.setLineDash([8, 5]);
+  ctx.font = font; ctx.fillStyle = color;
   ctx.beginPath(); ctx.roundRect(2, 2, cv.width - 4, cv.height - 4, 12); ctx.fill();
-  if (outlined) ctx.stroke();
-  ctx.fillStyle = outlined ? color : '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(text, 14, 32);
+  ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(text, 14, 32);
   const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true, sizeAttenuation: false });
   const s = new THREE.Sprite(mat);
   s.scale.set(0.042 * cv.width / cv.height, 0.042, 1);
@@ -212,15 +203,14 @@ const revealed = clouds.after.get(-2);
 [...statics, revealed].filter(Boolean).forEach(p => scene.add(p));
 
 const items = R.changes.map(c => {
-  const k = kindOf(c), color = STYLE[k][0], o = { c, k, color };
+  const k = c.status === 'unverified' ? 'unverified' : c.type, color = STYLE[k][0], o = { c, k, color };
   for (const side of SIDES) {
     const b = c['box_' + side];
     if (!b) continue;
-    // Unverified edges are darker than their grey tag: dashed grey lines vanish on grey furniture.
     const g = new THREE.Group(), pts = clouds[side].get(c.id), f = fill(b, color, 0.3);
     const e = k === 'unverified' ? edges(b, '#3f3f44', true) : edges(b, color, false);
     const tag = label(`${STYLE[k][1]} ${c.id}`, color, b);
-    // A move's tag hangs below its box top, so the arrow head, which ends above the box, stays visible.
+    // A move's tag hangs below the box top, clear of the arrow head.
     if (c.type === 'moved') tag.center.set(0.5, 1.2);
     if (pts) g.add(pts);
     g.add(e, f, tag);
@@ -232,33 +222,13 @@ const items = R.changes.map(c => {
     const lift = Math.max(c.box_before.size[2], c.box_after.size[2]) / 2 + 0.05;
     a.z += lift; b.z += lift;
     const len = a.distanceTo(b);
-    // Darker than the object's points so the head stays visible where it lands on them. Drawn over the scene:
-    // transparent objects come after the (transparent) points, and renderOrder keeps it under the tags.
+    // The arrow draws over the points but under the tags.
     o.arrow = new THREE.ArrowHelper(b.clone().sub(a).normalize(), a, len, 0x8f3f6f, Math.min(0.12, len / 3), Math.min(0.07, len / 5));
     [o.arrow.line, o.arrow.cone].forEach(m => { m.material.depthTest = false; m.material.transparent = true; m.renderOrder = 9; });
     scene.add(o.arrow);
   }
   return o;
 });
-
-// A grey wireframe camera where filming would settle an unverified change, with a dashed sight line to the spot.
-function ghostCamera(c) {
-  const w = c.check_from, at = new THREE.Vector3(...w.look_at), g = new THREE.Group(), body = new THREE.Group();
-  const q = [[-0.16, -0.1], [0.16, -0.1], [0.16, 0.1], [-0.16, 0.1]].map(([x, y]) => [x, y, 0.26]);
-  const segs = q.flatMap((p, i) => [0, 0, 0, ...p, ...p, ...q[(i + 1) % 4]]);
-  body.add(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(segs, 3)),
-                                  new THREE.LineBasicMaterial({ color: 0x55555a })));
-  body.position.set(...w.position);
-  body.up.set(0, 0, 1);
-  body.lookAt(at);
-  const sight = new THREE.Line(new THREE.BufferGeometry().setFromPoints([body.position, at]),
-                               new THREE.LineDashedMaterial({ color: 0x8a8a8a, dashSize: 0.05, gapSize: 0.04 }));
-  sight.computeLineDistances();
-  g.add(body, sight, label(`film ${c.id} here`, '#55555a', { center: w.position, size: [0, 0, 0.12] }, true));
-  scene.add(g);
-  return g;
-}
-items.forEach(o => { if (o.c.check_from) o.ghost = ghostCamera(o.c); });
 
 const paths = new THREE.Group();
 SIDES.forEach(side => {
@@ -267,7 +237,6 @@ SIDES.forEach(side => {
   paths.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: VIDEO[side] })));
   paths.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: VIDEO[side], size: 0.04 })));
 });
-paths.visible = false;
 scene.add(paths);
 
 let mode = 'Changes', painted = null, edit = 0, selected = null, playing = false, playT0 = 0, fly = null;
@@ -279,7 +248,7 @@ function fade(obj, a) {
   obj.material.depthWrite = a > 0.99;
 }
 
-// Spin about the object's own centre while that centre travels in a straight line; at s = 1 this is p_after = Rz(yaw) p + t.
+// Turn about the object's centre while the centre moves in a line; s = 1 gives Rz(yaw) p + t.
 function moveTo(o, s) {
   const tr = o.c.transform, p = o.c.box_before.center, g = o.before.g;
   const cy = Math.cos(tr.yaw), sy = Math.sin(tr.yaw);
@@ -300,22 +269,19 @@ function repaint(key, tint) {
 function apply() {
   const tint = $('showUnchecked').checked;
   if (painted !== mode + tint) repaint(mode + tint, tint);
-  const s = edit;
-  // A thin bar at the foot of the view shows how far the edits are applied, also in recordings of the view.
-  $('progress').style.display = mode === 'Before' && s > 0 && s < 1 ? 'block' : 'none';
-  $('progress').style.width = 100 * s + '%';
+  $('progress').style.display = mode === 'Before' && edit > 0 && edit < 1 ? 'block' : 'none';
+  $('progress').style.width = 100 * edit + '%';
   statics[0].visible = mode !== 'After';
   statics[1].visible = mode !== 'Before';
-  fade(revealed, mode === 'Before' ? s : 1);
+  fade(revealed, mode === 'Before' ? edit : 1);
   items.forEach(o => {
-    // The slider applies confirmed edits only; an unverified one stays as the before video filmed it.
+    // The slider applies confirmed edits only.
     const t = o.c.type, B = o.before, A = o.after, s = o.k === 'unverified' ? 0 : edit;
     let pb = 1, eb = 1, pa = 1, ea = 1;
     if (mode === 'Before') {
       if (t === 'removed') { pb = 1 - s; eb = Math.max(0.3, 1 - s); }
       if (t === 'added') { pa = s; ea = Math.max(0.3, s); }
-      // The rigid fit turns an object only about z; over the last quarter it hands over to the after points,
-      // so the end state is the after scene even for an object that also tipped over.
+      // Over the last quarter a move crossfades to its after points.
       if (t === 'moved') { const k = Math.min(1, Math.max(0, (s - 0.75) / 0.25)); pb = eb = 1 - k; pa = ea = k; }
     } else if (mode === 'After') {
       pb = 0;
@@ -324,36 +290,33 @@ function apply() {
       pb = 0.3; eb = 0.4;
     }
     if (t === 'moved') moveTo(o, mode === 'Before' ? s : 0);
-    const focus = !selected || selected === o ? 1 : 0.3, sel = selected === o;
+    const sel = selected === o, focus = !selected || sel ? 1 : 0.3;
     [[B, pb, eb], [A, pa, ea]].forEach(([part, p, e]) => {
       if (!part) return;
       fade(part.pts, p);
       fade(part.e, sel ? 1 : e * focus);
       part.f.visible = sel;
-      // The selected change draws over the points in front of it, so a flat object is not buried in its support.
+      // The selected change draws over the points in front of it.
       [part.e, part.f, part.pts].forEach(m => { if (m) { m.material.depthTest = !sel; m.renderOrder = sel ? 9 : 0; } });
     });
-    // A move gets one tag, like the top view: on its new place, or on the object as it travels in the before view.
+    // A move shows one tag: on the travelling object in Before, on its new place otherwise.
     if (t === 'moved') { B.tag.visible = mode === 'Before'; A.tag.visible = mode !== 'Before'; }
   });
   paths.visible = $('showPaths').checked;
-  items.forEach(o => { if (o.ghost) o.ghost.visible = $('showFilm').checked || selected === o; });
   legend();
 }
 
 function legend() {
   const kinds = ['removed', 'added', 'moved', 'unverified'].map(k => `<span>${tagHtml(k, '')}${k === 'unverified' ? 'unverified, dashed' : k}</span>`);
   const sw = c => `<i class="sw" style="background:rgb(${c.map(x => Math.round(255 * x)).join(',')})"></i>`;
-  if ($('showUnchecked').checked && mode === 'Overlay') kinds.push(`<span>${sw(unchecked())}too few views from the other video</span>`);
-  else if ($('showUnchecked').checked) {
-    // Only the videos whose points are on screen: Before shows after points only once edits apply.
+  if ($('showUnchecked').checked) {
+    // Only videos with points on screen; Before shows after points once edits apply.
     const shown = { before: mode !== 'After', after: mode !== 'Before' || edit > 0.01 };
-    SIDES.filter(s => shown[s]).forEach(s => kinds.push(`<span>${sw(UNCHECKED[s])}${s} video: too few views from the other</span>`));
+    if (mode === 'Overlay') kinds.push(`<span>${sw(unchecked())}too few views from the other video</span>`);
+    else SIDES.filter(s => shown[s]).forEach(s => kinds.push(`<span>${sw(UNCHECKED[s])}${s} video: too few views from the other</span>`));
+    kinds.push(`<span>${sw(HIDDEN)}hidden from the other video</span>`);
   }
-  if ($('showUnchecked').checked) kinds.push(`<span>${sw(HIDDEN)}hidden from the other video</span>`);
-  if (items.some(o => o.ghost && o.ghost.visible)) kinds.push('<span><i class="sw" style="border:2px solid #55555a"></i>grey camera: where to film next</span>');
   if (mode === 'Overlay' || paths.visible) SIDES.forEach(s => kinds.push(`<span><i class="sw" style="background:${VIDEO[s]}"></i>${s} video</span>`));
-  // Rebuilt on every slider step while playing, so touch the DOM only when the content changes.
   const html = kinds.join('');
   if (legend.html !== html) $('legend').innerHTML = legend.html = html;
 }
@@ -375,39 +338,30 @@ function setEdit(s) {
   edit = s;
   $('edit').value = s;
   $('editval').textContent = pct(s);
-  // The slider edits the before scene, so any other view switches to the before video.
   if (mode !== 'Before') setMode('Before'); else apply();
 }
 $('edit').oninput = e => { playing = false; $('play').innerHTML = '&#9654;'; setEdit(+e.target.value); };
 $('play').onclick = () => {
   playing = !playing;
   $('play').innerHTML = playing ? '&#10074;&#10074;' : '&#9654;';
+  // Resume the cycle near the slider position: 1.1 s hold, then a 2.2 s ramp.
   playT0 = performance.now() - (edit > 0 ? 1100 + 2200 * edit : 0);
 };
-$('showUnchecked').onchange = apply;
-$('showPaths').onchange = apply;
-$('showFilm').onchange = apply;
-$('showFilm').parentNode.hidden = !items.some(o => o.ghost);
+$('showUnchecked').onchange = $('showPaths').onchange = apply;
 
 function select(o) {
   selected = selected === o ? null : o;
   items.forEach(x => x.div.classList.toggle('sel', x === selected));
   apply();
   if (!selected) return;
-  const boxes = [o.c.box_before, o.c.box_after].filter(Boolean), w = o.c.check_from;
-  let centre = boxes.reduce((a, b) => a.add(new THREE.Vector3(...b.center)), new THREE.Vector3()).divideScalar(boxes.length);
+  const boxes = [o.c.box_before, o.c.box_after].filter(Boolean);
+  const centre = boxes.reduce((a, b) => a.add(new THREE.Vector3(...b.center)), new THREE.Vector3()).divideScalar(boxes.length);
   let r = Math.max(...boxes.map(b => Math.hypot(...b.size) / 2));
   if (boxes.length === 2) r += new THREE.Vector3(...boxes[0].center).distanceTo(new THREE.Vector3(...boxes[1].center)) / 2;
   const dir = camera.position.clone().sub(controls.target).normalize();
   dir.z = Math.max(dir.z, 0.6);
   dir.normalize();
-  let eye = centre.clone().addScaledVector(dir, Math.max(1.8, 4 * r));
-  if (w) {
-    // Stand a little behind and above the ghost camera, so the view shows what filming from there would see.
-    centre = new THREE.Vector3(...w.look_at);
-    const back = new THREE.Vector3(...w.position).sub(centre);
-    eye = centre.clone().addScaledVector(back, 1 + 0.9 / back.length()).add(new THREE.Vector3(0, 0, 0.5));
-  }
+  const eye = centre.clone().addScaledVector(dir, Math.max(1.8, 4 * r));
   fly = { t0: performance.now(), p0: camera.position.clone(), q0: controls.target.clone(), q1: centre, p1: eye };
 }
 
@@ -425,8 +379,6 @@ items.forEach(o => {
   div.innerHTML =
     `<div>${tagHtml(o.k, c.id)}<b>${esc(c.title)}</b><span class="st">${c.type}, ${c.status}</span></div>` +
     `<div class="sent">${esc(c.sentence)}</div><div class="reason">${esc(c.reason)}</div>` +
-    (c.check_from ? `<div class="reason">Film again from where the ${c.check_from.video} video stood at ` +
-                    `${c.check_from.time_s.toFixed(1)} s (grey camera in the view).</div>` : '') +
     `<div class="bar">${BAR.map(([k, col]) => `<i style="width:${100 * e[k]}%;background:${col || o.color}"></i>`).join('')}</div>` +
     `<div class="barlab">${e.points.toLocaleString('en-US')} points: ` +
     `${BAR.filter(([k]) => round(100 * e[k])).map(([k, , name]) => `${pct(e[k])} ${name}`).join(', ')}</div>` +
@@ -439,9 +391,8 @@ items.forEach(o => {
 });
 $('lightbox').onclick = () => { $('lightbox').style.display = 'none'; };
 const cov = R.coverage;
-$('coverage').textContent = `The other video checked ${pct(cov.checked)} of all surface points and had ${pct(cov.hidden)} hidden; ` +
-                            `it saw ${pct(cov.unchecked_before)} (before video) and ${pct(cov.unchecked_after)} (after video) in fewer than three frames. ` +
-                            '"areas not checked" tints both kinds.';
+$('coverage').textContent = `The other video checked ${pct(cov.checked)} of the surface points. It had ${pct(cov.hidden)} hidden ` +
+                            `and saw ${pct(cov.unchecked)} in fewer than three frames; "areas not checked" tints both.`;
 
 const c0 = DATA.center, r0 = DATA.radius;
 controls.target.set(c0[0], c0[1], c0[2] - 0.2);

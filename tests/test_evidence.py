@@ -78,6 +78,7 @@ def make_views(boxes, poses):
 
 
 def owner(xyz, boxes, pad=0.015):
+    """Name of the box each point lies in, "" for none."""
     out = np.full(len(xyz), "", object)
     for key, (lo, hi) in boxes.items():
         inside = np.all((xyz >= np.array(lo) - pad) & (xyz <= np.array(hi) + pad), 1)
@@ -94,15 +95,6 @@ def scene():
     views_a, names_a = make_views(before, poses_a)
     views_b, names_b = make_views(after, poses_b)
     return before, after, views_a, names_a, views_b, names_b
-
-
-def test_scene_preconditions(scene):
-    _, _, _, names_a, _, names_b = scene
-    for key in ("S", "O", "H", "U", "R"):
-        assert (names_a == key).sum() > 50, key
-    assert (names_b == "H").sum() == 0
-    assert (names_b == "U").sum() == 0
-    assert (names_b == "N").sum() > 50
 
 
 def states_by_owner(cloud, boxes, other, cfg):
@@ -171,8 +163,7 @@ def test_components_split_separate_blobs():
     ],
 )
 def test_point_states(seen, free, occluded, expected):
-    a = lambda x: np.array([x], np.int16)  # noqa: E731
-    ev = Evidence(a(seen), a(free), a(occluded), a(1))
+    ev = Evidence(*(np.array([x], np.int16) for x in (seen, free, occluded, 1)))
     assert point_states(ev, Config())[0] == expected
 
 

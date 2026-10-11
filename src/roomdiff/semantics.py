@@ -6,10 +6,7 @@ from transformers import AutoModel, AutoProcessor
 
 from .config import free_device
 
-# SigLIP 2 large matched so400m on 355 SceneDiff views (85.6 vs 81.4 % top-1 per view) at half the time per
-# crop and 2 GiB less memory; base was 5 to 10 points lower.
 MODEL, REVISION = "google/siglip2-large-patch16-384", "1b426889ea62b5a72bf9839009a1b184bfc9c178"
-# Five templates added 0.3 to 4.6 points of per-view accuracy over "a photo of a {}." alone.
 TEMPLATES = (
     "a photo of a {}.",
     "a photo of the {}.",
@@ -18,11 +15,9 @@ TEMPLATES = (
     "a photo of a {} in a room.",
 )
 BATCH = 16
-# Share of pixels the dominant colour word needs. At 0.4, 8 of 33 objects got a wrong colour; at 0.5, 4.
-COLOR_SHARE = 0.5
+COLOR_SHARE = 0.5  # share of pixels the dominant colour word needs
 
-# Room contents plus every SceneDiff label. Near-synonyms are left out because they split the softmax mass.
-# A list literal would be one line per word under ruff format, hence the split.
+# Room contents plus every SceneDiff label, without near-synonyms.
 OBJECTS = tuple(
     "chair, armchair, office chair, rocking chair, folding chair, stool, bar stool, ottoman, bench, "  # noqa: SIM905
     "sofa, table, coffee table, side table, desk, nightstand, dresser, cabinet, bookshelf, shelf, "
@@ -52,12 +47,11 @@ OBJECTS = tuple(
     "iron, ironing board, drying rack, hammer, screwdriver, drill, light bulb, fire extinguisher, "
     "bicycle, helmet, scooter, stroller, pet bed, person, cat, dog".split(", ")
 )
-# Raised supports only: whether something stands on the floor is decided by geometry, not by a model.
+# Raised supports only; the floor is found by geometry.
 SURFACES = tuple(
     "table, coffee table, dining table, side table, desk, sofa, armchair, bed, chair, stool, ottoman, "  # noqa: SIM905
-    "bench, shelf, bookshelf, cabinet, dresser, nightstand, counter, windowsill, tv stand, radiator".split(
-        ", "
-    )
+    "bench, shelf, bookshelf, cabinet, dresser, nightstand, counter, windowsill, "
+    "tv stand, radiator".split(", ")
 )
 
 
@@ -68,33 +62,27 @@ def crop(image: np.ndarray, mask: np.ndarray | None, box_xyxy: tuple, pad: float
     px, py = pad * (x1 - x0), pad * (y1 - y0)
     x0, y0 = max(0, round(x0 - px)), max(0, round(y0 - py))
     x1, y1 = min(w, round(x1 + px)), min(h, round(y1 + py))
-    # Keep the box's aspect and let the processor squash the crop to SigLIP's 384 x 384 input: square
-    # windows (more context along the short side) lost 2 to 9 points of per-view accuracy.
-    # With this model a pad of 0.15 beat 0.25 by 5 points (base and so400m preferred 0.25 by 1 to 2);
-    # 0.5 lost another 5 to 8.
+    # The box's aspect is kept; the processor squashes the crop to 384 x 384.
     out = image[y0:y1, x0:x1].astype(np.float32)
     if mask is not None:
-        # Dimming by 30 % towards grey says which object is meant (1 to 5 points); full grey lost 4 to 8,
-        # and coarse, dilated masks cost this model 1 to 2 points.
+        # Dim the rest 30 % towards grey to show which object is meant.
         out = np.where(mask[y0:y1, x0:x1, None], out, 0.7 * out + 0.3 * 128)
     return out.round().astype(np.uint8)
 
 
 def color_name(pixels: np.ndarray) -> str | None:
+    """Dominant colour word of (N, 3) RGB pixels, or None if no word reaches COLOR_SHARE."""
     if len(pixels) == 0:
         return None
     hsv = Image.fromarray(np.asarray(pixels, np.uint8).reshape(-1, 1, 3)).convert("HSV")
     h, s, v = (np.asarray(hsv, np.float32).reshape(-1, 3) / 255).T
     hue = np.array(["red", "orange", "yellow", "green", "blue", "purple", "pink", "red"])
     name = hue[np.digitize(h * 360, [15, 40, 70, 165, 255, 290, 340])]
-    # Thresholds fitted on 33 SceneDiff objects; in phone footage white surfaces sit at V = 0.6 to 0.9.
     warm = (name == "orange") | (name == "yellow")
     name[warm & (v < 0.6)] = "brown"
     beige = warm & (s >= 0.08) & (s < 0.35) & (v > 0.45)
     name[beige] = "beige"
     name[(name == "red") & (s < 0.6) & (v > 0.7)] = "pink"
-    # A warm, faintly saturated surface is beige even in shade; only the rest of the low-saturation
-    # pixels are white or grey.
     plain = (s < 0.2) & ~beige
     name[plain] = np.where(v[plain] > 0.65, "white", "grey")
     name[(v < 0.15) | ((v < 0.3) & (s < 0.4))] = "black"
@@ -104,8 +92,8 @@ def color_name(pixels: np.ndarray) -> str | None:
 
 
 def label(objects: list[list[np.ndarray]], surfaces: list[list[np.ndarray]], device: torch.device):
-    """Best word and its probability per object (from OBJECTS) and per support surface (from SURFACES),
-    each averaged over that item's crops. One model load for both."""
+    """Best word and its probability per object (OBJECTS) and per support surface (SURFACES), averaged
+    over each item's crops."""
     model = AutoModel.from_pretrained(MODEL, revision=REVISION, dtype=torch.float32).to(device).eval()
     processor = AutoProcessor.from_pretrained(MODEL, revision=REVISION)
     out = [
@@ -134,7 +122,7 @@ def classify(model, processor, crops: list[list[np.ndarray]], vocabulary, device
                 for i in range(0, len(prompts), BATCH)
             ]
         )
-        # Prompt ensembling as in CLIP (Radford et al., ICML 2021): average the normalised embeddings.
+        # Prompt ensembling as in CLIP: average the normalised template embeddings.
         text = F.normalize(
             F.normalize(text, dim=-1).view(len(vocabulary), len(TEMPLATES), -1).mean(1), dim=-1
         )
@@ -146,14 +134,11 @@ def classify(model, processor, crops: list[list[np.ndarray]], vocabulary, device
                 for i in range(0, len(images), BATCH)
             ]
         )
-        # Softmax over the vocabulary rather than SigLIP's per-word sigmoid, so the score is comparable
-        # between objects; the bias cancels.
+        # Softmax over the vocabulary instead of SigLIP's per-word sigmoid; the bias cancels.
         logits = model.logit_scale.exp() * F.normalize(image, dim=-1) @ text.T  # (views, vocabulary)
         probs = logits.softmax(-1).cpu().numpy()
     out, start = [], 0
     for views in crops:
-        # Averaging per-view probabilities beat averaging embeddings in 35 of 71 model and crop pairs,
-        # lost in 22.
         p = probs[start : start + len(views)].mean(0)
         start += len(views)
         out.append((vocabulary[int(p.argmax())], float(p.max())))

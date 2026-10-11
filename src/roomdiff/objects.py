@@ -36,10 +36,10 @@ def visible(xyz: np.ndarray, views: Views, i: int) -> tuple[np.ndarray, np.ndarr
     return u, v, inside & (d > 0) & (np.abs(d - z) < 0.05 + 0.03 * z)
 
 
-def best_frames(xyz: np.ndarray, views: Views, k: int = 3, min_points: int = 8) -> list[int]:
+def best_frames(xyz: np.ndarray, views: Views, k: int = 3) -> list[int]:
+    """Up to k keyframes that see the most points, spaced apart in time."""
     counts = np.array([visible(xyz, views, i)[2].sum() for i in range(len(views.depth))])
-    order = [int(i) for i in np.argsort(-counts) if counts[i] >= min_points]
-    # Prefer well-separated views: a neighbouring keyframe adds little new about the object.
+    order = [int(i) for i in np.argsort(-counts) if counts[i] >= 8]
     picked = []
     for i in order:
         if all(abs(i - j) >= max(2, len(counts) // 10) for j in picked):
@@ -50,15 +50,13 @@ def best_frames(xyz: np.ndarray, views: Views, k: int = 3, min_points: int = 8) 
 
 
 def hires(u: np.ndarray, v: np.ndarray) -> np.ndarray:
-    # Keyframe images are twice the reconstruction size; pixel centres map as 2x + 0.5.
+    """Reconstruction pixels to keyframe image pixels (twice the size, centres aligned): (N, 2)."""
     return np.stack([2 * u + 0.5, 2 * v + 0.5], -1)
 
 
 def sam_masks(jobs: dict[tuple[int, int], list[np.ndarray]], images, device) -> dict:
-    """SAM 2.1 for each (side, keyframe): one prompt per pixel set (box around it, point at its centre).
-
-    Returns, per job, a list of (pixels, masks (3, H, W), scores (3,), box) in the order given.
-    """
+    """SAM 2.1 per (side, keyframe), prompted with a box around each pixel set and a point at its centre.
+    Returns per job a list of (pixels, masks (3, H, W), scores (3,), box)."""
     from transformers import Sam2Model, Sam2Processor
 
     model = Sam2Model.from_pretrained(SAM_REPO, revision=SAM_REVISION).to(device).eval()
@@ -100,12 +98,11 @@ def segment(objs: list[Obj], clouds: tuple[Cloud, Cloud], views: tuple[Views, Vi
     for key, results in sam_masks(jobs, images, device).items():
         for o, (px, m, s, box) in zip(owners[key], results):
             pick = choose_mask(m, s, px, box)
-            # Without an acceptable SAM mask, the object's own projected points still mark where it is.
             o.masks[key[1]] = pick if pick is not None else splat(px, m.shape[1:])
 
 
 def splat(px: np.ndarray, hw: tuple[int, int]) -> np.ndarray:
-    """A mask from projected point pixels, closed over the gaps between 2 cm points."""
+    """A mask from projected point pixels, dilated over the gaps between 2 cm points."""
     m = np.zeros(hw, bool)
     q = np.round(px).astype(int).clip([0, 0], [hw[1] - 1, hw[0] - 1])
     m[q[:, 1], q[:, 0]] = True
@@ -113,15 +110,13 @@ def splat(px: np.ndarray, hw: tuple[int, int]) -> np.ndarray:
 
 
 def choose_mask(masks: np.ndarray, scores: np.ndarray, px: np.ndarray, box) -> np.ndarray | None:
-    # SAM often answers a box prompt with the supporting surface (pillow -> sofa). Accept only masks
-    # that cover most of the free points and are not much larger than the prompt box.
+    """Best-scoring mask that covers most points and is not much larger than the box, else None."""
     h, w = masks.shape[1:]
     q = np.round(px).astype(int).clip([0, 0], [w - 1, h - 1])
     box_area = max((box[2] - box[0]) * (box[3] - box[1]), 1.0)
     best, best_score = None, -1.0
     for m, s in zip(masks, scores):
-        coverage = m[q[:, 1], q[:, 0]].mean()
-        if coverage >= 0.6 and m.sum() <= 1.5 * box_area and s > best_score:
+        if m[q[:, 1], q[:, 0]].mean() >= 0.6 and m.sum() <= 1.5 * box_area and s > best_score:
             best, best_score = m, s
     return best
 
@@ -143,18 +138,17 @@ def lift(o: Obj, cloud: Cloud, views: Views) -> None:
         inside += ok & m[p[:, 1], p[:, 0]]
     grown = near[(inside >= 1) & (inside >= 0.5 * seen)]
     idx = np.union1d(o.seed, grown)
-    # A mask that leaked onto the support makes the object far larger than its free core; keep the core then.
-    span = lambda a: np.ptp(cloud.xyz[a], 0).max()  # noqa: E731
-    o.idx = idx if span(idx) <= max(3 * span(o.seed), span(o.seed) + 0.3) else o.seed
+    full, core = np.ptp(cloud.xyz[idx], 0).max(), np.ptp(seed, 0).max()
+    # Much larger than the seed means the mask leaked onto the support; keep the seed then.
+    o.idx = idx if full <= max(3 * core, core + 0.3) else o.seed
 
 
 def same_object(p: Obj, o: Obj) -> bool:
+    """Same side and either many shared points or one mask mostly inside the other in a shared view."""
     if p.side != o.side:
         return False
     if len(np.intersect1d(p.idx, o.idx)) >= 0.2 * min(len(p.idx), len(o.idx)):
         return True
-    # Occlusion splits one object into several free clusters; SAM then returns the same whole-object
-    # mask for each of them in a view they share.
     for i in set(p.masks) & set(o.masks):
         a, b = p.masks[i], o.masks[i]
         if (a & b).sum() >= 0.5 * min(a.sum(), b.sum()):
@@ -193,17 +187,14 @@ def tokens(model, rgb: np.ndarray, size: tuple[int, int]) -> torch.Tensor:
 
 
 def patch_mask(mask: np.ndarray, cols: int, rows: int, share: float) -> np.ndarray:
-    # Pillow resizes bool images with nearest neighbour whatever filter is asked for; go through uint8.
+    """(rows, cols) bool: patches whose area inside the mask exceeds share."""
+    # Via uint8: Pillow resizes bool images with nearest neighbour whatever the filter.
     area = np.asarray(Image.fromarray(mask.astype(np.uint8) * 255).resize((cols, rows), Image.Resampling.BOX))
     return area > share * 255
 
 
 def embed(objs: list[Obj], images, device) -> None:
-    """DINOv2 descriptor per object: patch tokens averaged inside the mask, averaged over views.
-
-    DINO features re-identify the same object across views far better than CLIP-style features
-    (SOCO benchmark, 2026); averaging inside the mask follows SceneDiff (Wu et al., arXiv 2512.16908).
-    """
+    """DINOv2 descriptor per object: patch tokens averaged in the mask as in SceneDiff, then over views."""
     model = dino(device)
     for o in objs:
         feats = []
@@ -224,12 +215,7 @@ def embed(objs: list[Obj], images, device) -> None:
 
 
 def body(idx: np.ndarray, cloud: Cloud) -> np.ndarray:
-    """The object's points above its contact zone.
-
-    The lowest part touches the support, which is still there, and tests as seen up to roughly the
-    depth band times the sine of the viewing angle: up to about 10 cm. Percentiles keep a stray point
-    from setting the zone.
-    """
+    """The object's points above its contact zone, where it touches the support and still tests as seen."""
     z = cloud.xyz[idx, 2]
     lo, hi = np.percentile(z, [3, 97])
     keep = idx[z > lo + min(0.10, max(0.03, 0.3 * (hi - lo)))]
@@ -237,7 +223,7 @@ def body(idx: np.ndarray, cloud: Cloud) -> np.ndarray:
 
 
 def verdict(o: Obj, cloud: Cloud, state: np.ndarray, cfg: Config) -> None:
-    """Confirmed only where the other video positively saw free space; otherwise say why not."""
+    """Status and reason from how much of the object the other video looked through."""
     st = state[body(o.idx, cloud)]
     names = (("free", FREE), ("seen", SEEN), ("occluded", OCCLUDED), ("unreached", UNREACHED))
     o.shares = {k: round(float(np.mean(st == s)), 3) for k, s in names} | {"points": int(len(st))}
@@ -248,21 +234,16 @@ def verdict(o: Obj, cloud: Cloud, state: np.ndarray, cfg: Config) -> None:
     z = cloud.xyz[o.idx, 2]
     height = np.percentile(z, 97) - np.percentile(z, 3)
     if decided < cfg.min_observed:
-        why = (
-            "hidden behind other things"
-            if o.shares["occluded"] > o.shares["unreached"]
-            else "seen too rarely"
-        )
+        hidden = o.shares["occluded"] > o.shares["unreached"]
+        why = "hidden behind other things" if hidden else "seen too rarely"
         o.status = "unverified"
         o.reason = f"the {other} video could check only {100 * decided:.0f} % of it; the rest was {why}"
     elif ratio >= cfg.confirm_ratio:
-        o.status, o.reason = (
-            "confirmed",
-            f"the {other} video looked through {looked} of the points it could check",
-        )
+        o.status = "confirmed"
+        o.reason = f"the {other} video looked through {looked} of the points it could check"
     elif ratio >= cfg.partial_ratio:
         o.status = "partial"
-        # body() keeps the contact zone of an object this flat; its seen points are the surface under it.
+        # body() keeps the contact zone of objects this flat.
         o.reason = (
             f"the {other} video looked through {looked} of it; at {100 * height:.0f} cm tall, the rest "
             "cannot be told apart from the surface under it"

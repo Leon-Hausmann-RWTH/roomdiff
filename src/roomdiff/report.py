@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont
 
-from .geometry import Cloud, Views, project
+from .geometry import Cloud, Views, project, rz
 
 COLORS = {"removed": "#D55E00", "added": "#0072B2", "moved": "#CC79A7", "unverified": "#8A8A8A"}
 GLYPHS = {"removed": "−", "added": "+", "moved": "→", "unverified": "?"}
@@ -14,10 +14,8 @@ NEAR = 0.05  # metres; box edges are clipped at this camera depth
 CARD = (640, 480)
 PLAN = (940, 1320)  # largest plan area in pixels, left of the legend
 HEIGHT_TOP = 1.5  # metres; the floor plan grey saturates here
-GREY = (110, 110, 110)
 Pair = tuple[np.ndarray, np.ndarray]  # one array per video, before then after
-# Pillow bundles this font, so images look the same everywhere; it lacks minus and arrow, hence tag().
-font = ImageFont.load_default
+font = ImageFont.load_default  # Pillow's bundled font, which has no minus or arrow glyph
 
 
 def kind(change: dict) -> str:
@@ -25,14 +23,12 @@ def kind(change: dict) -> str:
 
 
 def corners(box: dict) -> np.ndarray:
-    c, s = np.cos(box["yaw"]), np.sin(box["yaw"])
-    R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
     signs = np.array([[x, y, z] for z in (-1, 1) for y in (-1, 1) for x in (-1, 1)])
-    return np.asarray(box["center"]) + (signs * np.asarray(box["size"]) / 2) @ R.T  # (8, 3)
+    return np.asarray(box["center"]) + (signs * np.asarray(box["size"]) / 2) @ rz(box["yaw"]).T  # (8, 3)
 
 
 def tag(d: ImageDraw.ImageDraw, x: float, y: float, k: str, text: str, h: int) -> tuple:
-    # A rounded box in the change colour with its glyph drawn as lines, then the id.
+    """Draw a rounded tag in the change colour, its glyph as lines, then text; return its bounds."""
     f, cx, cy, s = font(round(h * 0.66)), x + h / 2, y + h / 2, h * 0.62
     w, lw, r = h + (d.textlength(text, font=f) + h * 0.3 if text else 0), max(2, round(s / 6)), s * 0.38
     d.rounded_rectangle((x, y, x + w, y + h), radius=h * 0.22, fill=COLORS[k])
@@ -50,6 +46,7 @@ def tag(d: ImageDraw.ImageDraw, x: float, y: float, k: str, text: str, h: int) -
 
 
 def ring(d: ImageDraw.ImageDraw, pts: np.ndarray, fill, width: int, dash=0.0, closed=True) -> None:
+    """Draw a polyline through pts, closed or open, solid or with dashes of length dash."""
     for p, q in zip(pts, np.roll(pts, -1, 0)[: len(pts) - (not closed)]):
         n = max(np.linalg.norm(q - p), 1e-6)
         for a in np.arange(0, n, 2 * dash) if dash else [0]:
@@ -58,6 +55,7 @@ def ring(d: ImageDraw.ImageDraw, pts: np.ndarray, fill, width: int, dash=0.0, cl
 
 
 def pick_frame(xyz: np.ndarray, box: dict, views: Views, sharp: np.ndarray, present: bool) -> int | None:
+    """Index of the keyframe that shows the points xyz best, or None if no frame sees them."""
     h, w = views.depth.shape[1:]
     good, inside = np.zeros(len(views.depth)), np.zeros(len(views.depth))
     for i in range(len(views.depth)):
@@ -67,24 +65,25 @@ def pick_frame(xyz: np.ndarray, box: dict, views: Views, sharp: np.ndarray, pres
         # A present object must be the visible surface; an empty place must be seen or seen through.
         hit = (np.abs(d - z) < 0.05 + 0.03 * z if present else d > z - 0.05 - 0.03 * z) & (d > 0)
         cu, cv, cz = project(corners(box), views.K[i], views.c2w[i])
-        # Frames that cut the box off count less, so the card shows the whole object where it can.
+        # Frames that cut the box off count less.
         whole = ((cz > NEAR) & (cu >= 0) & (cu < w) & (cv >= 0) & (cv < h)).mean() ** 2
         good[i], inside[i] = hit.sum() * whole, ok.sum()
     score = good if good.max() > 0 else inside
     if score.max() == 0:
         return None
-    # Among frames that show nearly as much of the object as the best one, motion blur decides.
+    # The sharpest frame among those that score at least 80 % of the best.
     return int(np.argmax(np.where(score >= 0.8 * score.max(), sharp, -1)))
 
 
 def card(image: np.ndarray, K: np.ndarray, c2w: np.ndarray, box: dict, c: dict, caption: str) -> Image.Image:
+    """Crop the frame to 4:3 around the box and draw its edges, the change tag and the caption."""
     w2c = np.linalg.inv(c2w)
     cam = corners(box) @ w2c[:3, :3].T + w2c[:3, 3]
     segs = []
     for p, q in (cam[list(e)] for e in EDGES):
         if p[2] < NEAR and q[2] < NEAR:
             continue
-        # Clip at the near plane so edges that pass behind the camera do not wrap across the image.
+        # Clip the edge at the near plane.
         if p[2] < NEAR:
             p = p + (q - p) * (NEAR - p[2]) / (q[2] - p[2])
         if q[2] < NEAR:
@@ -93,6 +92,7 @@ def card(image: np.ndarray, K: np.ndarray, c2w: np.ndarray, box: dict, c: dict, 
     H, W = image.shape[:2]
     segs = np.array(segs).reshape(-1, 2, 2)  # (E, 2, 2) pixels
     lo, hi = segs.reshape(-1, 2).min(0).clip(0, [W, H]), segs.reshape(-1, 2).max(0).clip(0, [W, H])
+    # A 4:3 crop about 2.2 times the box, at least 0.4 of the frame width.
     cw = min(max((hi - lo)[0] * 2.2, (hi - lo)[1] * 2.2 * 4 / 3, 0.4 * W), W, H * 4 / 3)
     x0 = float(np.clip((lo + hi)[0] / 2 - cw / 2, 0, W - cw))
     y0 = float(np.clip((lo + hi)[1] / 2 - cw * 3 / 8, 0, H - cw * 3 / 4))
@@ -113,8 +113,8 @@ def card(image: np.ndarray, K: np.ndarray, c2w: np.ndarray, box: dict, c: dict, 
 def write_cards(
     out_dir: Path, changes: list[dict], objects: dict[int, tuple], views: tuple, hires: Pair
 ) -> None:
-    # objects[id] holds the object's world points in each video, None where it is absent; views are
-    # Views at reconstruction resolution and hires the keyframes at a whole multiple of it.
+    """Write a card per change and video. objects[id] holds world points per video, None where absent;
+    hires are the keyframes of views at a whole multiple of their resolution."""
     (out_dir / "cards").mkdir(parents=True, exist_ok=True)
     for old in (out_dir / "cards").glob("*.jpg"):
         old.unlink()
@@ -125,7 +125,7 @@ def write_cards(
     for c in changes:
         pts, c["cards"] = objects[c["id"]], {}
         for s, side in enumerate(SIDES):
-            # Where the object is absent, the card shows its box from the other video over the empty place.
+            # Where the object is absent, show its box from the other video over the empty place.
             present, box = pts[s] is not None, c[f"box_{side}"] or c[f"box_{SIDES[1 - s]}"]
             i = pick_frame(pts[s] if present else pts[1 - s], box, views[s], sharp[s], present)
             c["cards"][side] = None if i is None else f"cards/{c['id']}_{side}.jpg"
@@ -133,14 +133,8 @@ def write_cards(
                 continue
             K = views[s].K[i].copy()
             K[:2] *= hires[s].shape[2] / views[s].depth.shape[2]
-            empty = (
-                ""
-                if present
-                else ", same place"
-                if c["status"] == "unverified"
-                else (", not there yet", ", gone")[s]
-            )
-            caption = f"{side} video, frame {views[s].frame_ids[i]}{empty}"
+            gone = ", same place" if c["status"] == "unverified" else (", not there yet", ", gone")[s]
+            caption = f"{side} video, frame {views[s].frame_ids[i]}{'' if present else gone}"
             out = out_dir / c["cards"][side]
             card(hires[s][i], K, views[s].c2w[i], box, c, caption).save(out, quality=88)
 
@@ -157,7 +151,7 @@ def write_floorplan(
     hi = lo + np.ceil((ext.max(0) + 0.3 - lo) / 0.1) * 0.1
     s = min(PLAN[0] / (hi - lo)[0], PLAN[1] / (hi - lo)[1])  # pixels per metre
     pw, ph, m = int((hi - lo)[0] * s), int((hi - lo)[1] * s), 40
-    # Tall enough for the legend with one row per change; cropped to what was drawn at the end.
+    # Room for the legend, one row per change; cropped to what was drawn at the end.
     img = Image.new("RGB", (pw + 510 + 3 * m, max(ph, 1000 + 50 * len(changes)) + 2 * m), "white")
 
     def px(p) -> np.ndarray:
@@ -175,8 +169,8 @@ def write_floorplan(
     shade = np.where(top < 0, 255, 236 - 116 * top / HEIGHT_TOP).reshape(shape).astype(np.uint8)
     grey = Image.fromarray(shade, "L").filter(ImageFilter.MinFilter(3))
     img.paste(grey.resize((pw, ph), Image.NEAREST), (m, m))
-    # A cell is tinted when the other video saw every point in it in too few frames; the tint is the video
-    # with more points there. Hidden points sit in columns with checked ones, so only the viewer shows them.
+    # Tint a cell where the other video saw every point in too few frames, in the colour of the video
+    # with more points there.
     flat, shape = cells(0.05)
     n, split = shape[0] * shape[1], len(before.xyz)
     reached = np.bincount(flat, state != 3, n) > 0
@@ -200,14 +194,12 @@ def write_floorplan(
             a, b = px(c["box_before"]["center"][:2]), px(c["box_after"]["center"][:2])
             n_ab = max(np.linalg.norm(b - a), 1e-6)
             v = (b - a) / n_ab
-            # End at the outline, roughly, but keep a short move readable as an arrow.
+            # End near the outline, but keep a short move long enough to read as an arrow.
             b = a + v * max(n_ab - min(c["box_after"]["size"][:2]) * s / 2 - 4, min(n_ab, 60))
             h = min(30, 0.5 * n_ab)
             n = np.array([-v[1], v[0]]) * h / 2
             d.line([tuple(a), tuple(b - v * (h - 10))], fill=col, width=5)
             d.polygon([tuple(b), tuple(b - v * h + n), tuple(b - v * h - n)], fill=col)
-        if c["check_from"]:
-            camera_glyph(d, px(c["check_from"]["position"][:2]), px(c["check_from"]["look_at"][:2]))
     for c in changes:
         place_tag(d, px(corners(c["box_after"] or c["box_before"])[:, :2]), taken, c, 40)
     bottom = legend(d, pw + 2 * m, m, result, s)
@@ -227,15 +219,8 @@ def place_tag(d: ImageDraw.ImageDraw, fp: np.ndarray, taken: list, c: dict, h: i
     taken.append(tag(d, x, y, kind(c), str(c["id"]), h))
 
 
-def camera_glyph(d: ImageDraw.ImageDraw, p: np.ndarray, target: np.ndarray) -> None:
-    # A top view of a camera: its field of view as a wedge, with a dashed sight line to the spot to film.
-    v = (target - p) / max(np.linalg.norm(target - p), 1e-6)
-    ring(d, np.array([p, target]), GREY, 2, dash=7, closed=False)
-    wedge = [p, p + 36 * v + 22 * np.array([-v[1], v[0]]), p + 36 * v - 22 * np.array([-v[1], v[0]])]
-    d.polygon([tuple(q) for q in wedge], fill=(*GREY, 110), outline=GREY, width=3)
-
-
 def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> int:
+    """Draw the legend from (x, y) at s pixels per metre; return the y below it."""
     f = font(26)
     d.text((x, y), "Top view of the changes", font=font(32), fill="black")
     d.text((x, y + 44), f"{result['before']} and {result['after']}", font=font(23), fill=(100, 100, 100))
@@ -262,9 +247,6 @@ def legend(d: ImageDraw.ImageDraw, x: int, y: int, result: dict, s: float) -> in
     for k in COLORS:
         tag(d, x, y, k, "", 34)
         row(texts.get(k, k))
-    if any(c["check_from"] for c in result["changes"]):
-        camera_glyph(d, np.array([x + 2.0, y + 17]), np.array([x + 54.0, y + 17]))
-        row("where to film next (unverified)")
     row("Too few views from the other video", 0, 70)
     for side in SIDES:
         d.rectangle((x, y, x + 48, y + 34), fill=(*VIDEO_RGB[side], 60))
@@ -285,12 +267,8 @@ def pct(x: float) -> str:
     return f"{100 * x:.0f} %"
 
 
-def join_and(parts: list[str]) -> str:
-    return " and ".join([", ".join(parts[:-1]), parts[-1]] if len(parts) > 1 else parts)
-
-
 def write_report(path: Path, result: dict) -> None:
-    n, cov, led = result["counts"], result["coverage"], result["ledger"]
+    n, cov = result["counts"], result["coverage"]
     total = n["moved"] + n["added"] + n["removed"]
     found = ", ".join(f"{n[t]} {t}" for t in ("moved", "added", "removed") if n[t])
     found = f"{total} change{'s' * (total != 1)}: {found}" if total else "no changes"
@@ -303,8 +281,7 @@ def write_report(path: Path, result: dict) -> None:
     }
     rows, sections = [], []
     for c in result["changes"]:
-        mo, w, e, g = c["motion"], c["check_from"], c["evidence"], GLYPHS[kind(c)]
-        blocked = c["floor_blocked_m2"]
+        mo, e, g, blocked = c["motion"], c["evidence"], GLYPHS[kind(c)], c["floor_blocked_m2"]
         rows.append(f"| {c['id']} | {g} | {c['type']} | {c['title']} | {c['status']} | {c['sentence']} |")
         turn = f", turned {mo['turn_deg']:.0f} degrees" if mo and mo["turn_deg"] is not None else ""
         shares = ", ".join(f"{pct(e[k])} {v}" for k, v in words.items() if round(100 * e[k]))
@@ -312,33 +289,19 @@ def write_report(path: Path, result: dict) -> None:
             f"Status: {c['status']} ({c['reason']}).",
             mo and f"Motion: {mo['distance_m']:.2f} m{turn}.",
             blocked and f"Floor now blocked: {blocked:.2f} m².",
-            w and f"Film again from where the {w['video']} video stood at {w['time_s']:.1f} s.",
             f"Evidence: {e['points']:,} points: {shares}.",
         ]
         cards = [f'<img src="{p}" width="49%">' if p else f"(no {s} view)" for s, p in c["cards"].items()]
         sections.append(f"## {g} {c['id']}: {c['title']}, {c['type']}\n\n{c['sentence']}\n\n")
         sections[-1] += "\n".join(f"- {f}" for f in facts if f) + "\n\n" + " ".join(cards) + "\n"
-    only = [
-        f"{pct(cov['unchecked_' + v])} from the {v} video"
-        for v in SIDES
-        if round(100 * cov["unchecked_" + v])
-    ]
-    rest = " The other video saw the rest in fewer than three frames"
-    tints = (
-        "The viewer tints them and the hidden points; the top view tints places where nothing was checked."
+    rare = pct(cov["unchecked"])
+    coverage = (
+        f"The other video checked {pct(cov['checked'])} of the surface points. It had {pct(cov['hidden'])} "
+        f"hidden and saw {rare} in fewer than three frames; the viewer can tint both."
     )
-    one = f"{rest}: {join_and(only)}. {tints}" if only else ""
-    checked = f"The other video checked {pct(cov['checked'])} of all surface points"
-    checked += f"; {pct(cov['hidden'])} were hidden from it."
-    names = ("confirmed changes", "unverified changes", "dismissed candidates", "no candidate")
-    keys = ("confirmed", "unverified", "dismissed", "residual")
-    ledger = join_and([f"{pct(led[k])} {v}" for k, v in zip(keys, names) if round(100 * led[k])])
     table, body = "\n".join(rows), "\n".join(sections)
     unverified = (
-        "Unverified means not enough evidence either way: the other video saw too little of it, part of it "
-        "is still there, or it is too flat to tell from the surface under it.\n"
-        if n["unverified"]
-        else ""
+        "Unverified: the evidence is not enough to decide; each entry says why.\n" if n["unverified"] else ""
     )
     height = (
         f"The camera was held {result['camera_height_m']:.2f} m above the floor."
@@ -349,7 +312,7 @@ def write_report(path: Path, result: dict) -> None:
     path.write_text(f"""# What changed in the room
 
 Between {result["before"]} and {result["after"]} roomdiff found {found}.
-{unverified}{height} Boxes and positions are in changes.json; its "frame" field gives the axes.
+{unverified}{height} Positions and boxes are in changes.json.
 
 {warn}![Top view of the changes](floorplan.png)
 
@@ -360,14 +323,11 @@ Between {result["before"]} and {result["after"]} roomdiff found {found}.
 {body}
 ## Coverage
 
-{checked}{one}
-
-The points the other video looked through belong to: {ledger}.
+{coverage}
 
 ## Method
 
-Both videos were reconstructed in one pass into a shared metric frame with z up. A surface counts as removed
-or added only where the other video looked through the place it occupied. Each change keeps the share of its
-points that the other video looked through, saw as a surface, had hidden behind something nearer, or saw in
-fewer than three frames (too few views).
+Both videos are reconstructed together in one metric frame. A surface counts as removed or added only where
+the other video looked through the place it occupied. Each change lists how many of its points the other video
+looked through, saw as a surface, had hidden, or saw too rarely to decide.
 """)
