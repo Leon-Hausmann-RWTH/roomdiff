@@ -25,7 +25,7 @@ uv run roomdiff run examples/living_room/before.mp4 examples/living_room/after.m
 open runs/demo/viewer.html
 ```
 
-Tested on Apple Silicon. CUDA is supported but untested, and the CPU is slow. The first run downloads about 10 GB of model weights. After that a pair takes 3 to 4 minutes on an M2 Max.
+Tested on Apple Silicon. CUDA is supported but untested, and the CPU is slow. The first run downloads about 10 GB of model weights. After that a pair takes 2.5 to 4 minutes on an M2 Max.
 
 The output folder holds `viewer.html`, `report.md`, `floorplan.png`, `changes.json` and `scene.ply`. `changes.json` has one record per change: type, status, reason, sentence, 3D boxes, the move transform and the evidence behind it. `scene.ply` holds both point clouds with a change id and an evidence state per point.
 
