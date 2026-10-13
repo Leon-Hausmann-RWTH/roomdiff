@@ -37,7 +37,7 @@ class Args:
     name: str
     """Folder name under examples/."""
     docs: bool = True
-    """Make this the main example: docs/index.html and the README media."""
+    """Make this the main example: docs/index.html, the top view, cards and evidence figure."""
     config: Config = field(default_factory=Config)
 
 
@@ -168,9 +168,9 @@ def main(args: Args) -> None:
     res.warnings[:0] = notes
     result = write_outputs(res, output, args.config)
     media = Path("docs/media")
+    # The GIF first, so a missing browser fails before the rest of docs/ changes.
+    slider_gif(output / "viewer.html", media / f"slider_{args.name}.gif")
     if args.docs:
-        # The GIF first, so a missing browser fails before docs/ changes.
-        slider_gif(output / "viewer.html", media / "edit_slider.gif")
         Image.open(output / "floorplan.png").save(media / "floorplan.png")
         evidence_figure(res, result, args.config, media / "evidence_example.png")
         Path("docs/index.html").write_text(INDEX.format(name=args.name))

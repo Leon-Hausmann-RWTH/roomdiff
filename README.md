@@ -2,9 +2,9 @@
 
 roomdiff compares two phone videos of a room and shows in 3D what was moved, added or removed. It reports a change only where the other video looked through the spot. Places it could not check are marked as not checked.
 
-![The confirmed edits applied to the before scene](docs/media/edit_slider.gif)
+![The confirmed edits applied to the before scene](docs/media/slider_my_room.gif)
 
-*Own iPhone recording: the detected changes applied to the before scene. The chair moves 1.6 m and turns, the stool and the candle holder disappear, and a backpack appears. Tags 4 and 6 are false (see below).*
+*Own iPhone recording: the detected changes applied to the before scene. The chair moves 1.6 m and turns, the stool and the candle holder disappear, and a backpack appears. Tags 4 and 6 are false alarms: a cluster of 20 points and the chair's reflection in the glass door.*
 
 ## Examples
 
@@ -15,9 +15,7 @@ roomdiff compares two phone videos of a room and shows in 3D what was moved, add
 
 ![Before and after frames of each change](docs/media/cards.jpg)
 
-The main example is a pair of 16 s iPhone videos filmed for this project. Between them a chair was moved and turned, a stool and a 40 cm candle holder were taken away, and a backpack was put on the floor. roomdiff finds all four with the right type. It also reports two changes that did not happen: the chair's reflection in the glass door next to its new place, and a small cluster of 20 points.
-
-The other two examples come from the SceneDiff benchmark, so the misses are known. In the living room roomdiff finds 4 of 7 changes. It misses a loaf of bread, a tissue box and a remote, and calls a tote bag a slipper. In the bedroom it finds 3 of 4 and misses a flat cable.
+The main example is a pair of 16 s iPhone videos filmed for this project. Between them a chair was moved and turned, a stool and a 40 cm candle holder were taken away, and a backpack was put on the floor. roomdiff finds all four with the right type. It also reports two changes that did not happen: the chair's reflection in the glass door next to its new place, and a small cluster of 20 points. The other two examples come from the benchmark below.
 
 ## Quickstart
 
@@ -31,6 +29,8 @@ Tested on Apple Silicon. CUDA is supported but untested, and the CPU is slow. Th
 
 The output folder holds `viewer.html`, `report.md`, `floorplan.png`, `changes.json` and `scene.ply`. `changes.json` has one record per change: type, status, reason, sentence, 3D boxes, the move transform and the evidence behind it. `scene.ply` holds both point clouds with a change id and an evidence state per point.
 
+For your own videos: film the same room twice for 10 to 20 s, in landscape, walking at least 1 m sideways past everything that changes, and change objects at least 10 cm tall. Then run `uv run roomdiff run before.MOV after.MOV --out runs/mine`.
+
 ## How it works
 
 ![Ray evidence](docs/media/evidence.svg)
@@ -43,7 +43,14 @@ The output folder holds `viewer.html`, `report.md`, `floorplan.png`, `changes.js
 
 ## Results
 
-18 test pairs of the [SceneDiff benchmark](https://huggingface.co/datasets/yuqun/SceneDiff) with 50 changed objects. The baseline marks every point that has no point of the other video within 5 cm.
+The own recording has no labelled ground truth, so roomdiff was also measured on the [SceneDiff benchmark](https://huggingface.co/datasets/yuqun/SceneDiff): real indoor video pairs with every change labelled. Two of its pairs are examples here.
+
+| Living room: 4 of 7 changes found | Bedroom: 3 of 4 changes found |
+|---|---|
+| ![Living room](docs/media/slider_living_room.gif) | ![Bedroom](docs/media/slider_bedroom.gif) |
+| The cushion moves, the stool and the coat disappear. Missed: a loaf of bread, a tissue box and a remote. The tote bag (4) is left unverified. | The bag moves, a toy and a bottle appear. Missed: a flat cable. |
+
+On 18 test pairs with 50 changed objects roomdiff scores as below. The baseline marks every point that has no point of the other video within 5 cm.
 
 | | roomdiff | baseline |
 |---|---|---|
@@ -60,15 +67,6 @@ Thresholds were set on 4 other SceneDiff pairs (living_room_1_2, bedroom_2_4, lo
 ![Where the two videos disagree](docs/media/evidence_example.png)
 
 [DESIGN.md](DESIGN.md) explains the design choices, gives more numbers and lists the commands that reproduce the table.
-
-## Your own videos
-
-- Film two videos of the same room, 10 to 20 s each, in the same light. Use landscape, turn HDR Video off if the phone offers it, and lock exposure.
-- Walk at least 1 m sideways instead of turning on the spot, and pass every place that changes. Film the second video along a slightly different path.
-- Change objects at least 10 cm tall.
-- Run `uv run roomdiff run before.MOV after.MOV --out runs/mine`.
-
-`scripts/make_example.py` turns a pair into a committed example and rebuilds the media above.
 
 ## Limitations
 
