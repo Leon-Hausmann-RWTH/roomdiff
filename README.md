@@ -17,19 +17,33 @@ roomdiff compares two phone videos of a room and shows in 3D what was moved, add
 
 The main example is a pair of 16 s iPhone videos filmed for this project. Between them a chair was moved and turned, a stool and a 40 cm candle holder were taken away, and a backpack was put on the floor. roomdiff finds all four with the right type. It also reports two changes that did not happen: the chair's reflection in the glass door next to its new place, and a small cluster of 20 points. The other two examples come from the benchmark below.
 
-## Quickstart
+## How to run
 
-```bash
-uv sync
-uv run roomdiff run examples/my_room/before.mp4 examples/my_room/after.mp4 --out runs/demo
-open runs/demo/viewer.html
-```
+You need [uv](https://docs.astral.sh/uv/getting-started/installation/) (on a Mac: `brew install uv`) and about 12 GB of free disk space. Tested on Apple Silicon. NVIDIA GPUs (CUDA) are supported but untested, and the CPU is slow.
 
-Tested on Apple Silicon. CUDA is supported but untested, and the CPU is slow. The first run downloads about 10 GB of model weights. After that a pair takes 2.5 to 4 minutes on an M2 Max.
+1. Install:
 
-The output folder holds `viewer.html`, `report.md`, `floorplan.png`, `changes.json` and `scene.ply`. `changes.json` has one record per change: type, status, reason, sentence, 3D boxes, the move transform and the evidence behind it. `scene.ply` holds both point clouds with a change id and an evidence state per point.
+   ```bash
+   git clone https://github.com/Leon-Hausmann-RWTH/roomdiff.git
+   cd roomdiff
+   uv sync
+   ```
 
-For your own videos: film the same room twice for 10 to 20 s, in landscape, walking at least 1 m sideways past everything that changes, and change objects at least 10 cm tall. Then run `uv run roomdiff run before.MOV after.MOV --out runs/mine`.
+2. Run the main example. The first run downloads about 10 GB of model weights; after that a pair takes 2.5 to 4 minutes on an M2 Max.
+
+   ```bash
+   uv run roomdiff run examples/my_room/before.mp4 examples/my_room/after.mp4 --out runs/demo
+   ```
+
+3. Open the results in `runs/demo/`. `viewer.html` is the 3D view and opens in any browser (`open runs/demo/viewer.html` on a Mac). `report.md` lists every change with its sentence and before/after frames, `floorplan.png` is the top view, `changes.json` has one record per change and `scene.ply` holds both point clouds. The same files are in `examples/my_room/output/` for comparison.
+
+4. Run your own videos the same way. Film the same room twice for 10 to 20 s, in landscape, walking at least 1 m sideways past everything that changes, and change objects at least 10 cm tall. Then:
+
+   ```bash
+   uv run roomdiff run before.MOV after.MOV --out runs/mine
+   ```
+
+`uv run roomdiff run --help` lists all options, for example `--config.device cpu`.
 
 ## How it works
 
