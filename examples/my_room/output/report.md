@@ -3,9 +3,9 @@
 Between before.mp4 and after.mp4 roomdiff found 6 changes: 1 moved, 2 added, 3 removed.
 The camera was held 1.27 m above the floor. Positions and boxes are in changes.json.
 
-Warning: before.MOV is HDR video; record with HDR Video off for true colours.
+Warning: before.mp4 is HDR video; record with HDR Video off for true colours.
 
-Warning: after.MOV is HDR video; record with HDR Video off for true colours.
+Warning: after.mp4 is HDR video; record with HDR Video off for true colours.
 
 Warning: both videos look in almost one direction; gravity comes from surface normals.
 

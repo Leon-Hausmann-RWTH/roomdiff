@@ -5,8 +5,8 @@
  "camera_height_m": 1.27,
  "floor_found": true,
  "warnings": [
-  "before.MOV is HDR video; record with HDR Video off for true colours",
-  "after.MOV is HDR video; record with HDR Video off for true colours",
+  "before.mp4 is HDR video; record with HDR Video off for true colours",
+  "after.mp4 is HDR video; record with HDR Video off for true colours",
   "both videos look in almost one direction; gravity comes from surface normals"
  ],
  "counts": {

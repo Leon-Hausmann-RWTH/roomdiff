@@ -166,11 +166,11 @@ def evidence_figure(res: Result, result: dict, cfg: Config, path: Path) -> None:
 
 
 def main(args: Args) -> None:
-    # The CLI's input checks, on the original files (the copies lose the HDR tag).
-    notes = [n for p in (args.before, args.after) for n in check_video(p, args.config)]
     root = Path("examples") / args.name
     before = copy_video(args.before, root / "before.mp4")
     after = copy_video(args.after, root / "after.mp4")
+    # The CLI's input checks and warnings, on the copies a rerun of the example reads.
+    notes = [n for p in (before, after) for n in check_video(p, args.config)]
     output = root / "output"
     res = analyse(before, after, args.config)
     res.warnings[:0] = notes
