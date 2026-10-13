@@ -2,24 +2,24 @@
 
 Between before.mp4 and after.mp4 roomdiff found 4 changes: 1 moved, 3 removed; 1 of them unverified.
 Unverified: the evidence is not enough to decide; each entry says why.
-The camera was held 1.49 m above the floor. Positions and boxes are in changes.json.
+The camera was held 1.46 m above the floor. Positions and boxes are in changes.json.
 
 ![Top view of the changes](floorplan.png)
 
 | id | | type | name | status | sentence |
 |---|---|---|---|---|---|
-| 1 | → | moved | cushion | confirmed | The grey cushion moved 1.6 m along the sofa. |
+| 1 | → | moved | cushion | confirmed | The grey cushion moved 1.5 m along the sofa. |
 | 2 | − | removed | stool | confirmed | The white stool on the floor was removed. |
-| 3 | − | removed | possibly a blanket | confirmed | The object on the sofa (83 cm up), possibly a blanket, was removed. |
-| 4 | ? | removed | shoe | unverified | The beige shoe on the shelf (50 cm up) may have been removed. |
+| 3 | − | removed | blanket | confirmed | The beige blanket on the sofa (79 cm up) was removed. |
+| 4 | ? | removed | possibly a slipper | unverified | The object on the chair (48 cm up), possibly a slipper, may have been removed. |
 
 ## → 1: cushion, moved
 
-The grey cushion moved 1.6 m along the sofa.
+The grey cushion moved 1.5 m along the sofa.
 
 - Status: confirmed (the after video looked through 70 % of the points it could check).
-- Motion: 1.56 m.
-- Evidence: 888 points: 70 % looked through, 30 % surface seen.
+- Motion: 1.54 m.
+- Evidence: 895 points: 70 % looked through, 30 % surface seen.
 
 <img src="cards/1_before.jpg" width="49%"> <img src="cards/1_after.jpg" width="49%">
 
@@ -27,32 +27,32 @@ The grey cushion moved 1.6 m along the sofa.
 
 The white stool on the floor was removed.
 
-- Status: confirmed (the after video looked through 93 % of the points it could check).
-- Evidence: 462 points: 92 % looked through, 7 % surface seen, 1 % too few views.
+- Status: confirmed (the after video looked through 97 % of the points it could check).
+- Evidence: 509 points: 96 % looked through, 3 % surface seen, 1 % too few views.
 
 <img src="cards/2_before.jpg" width="49%"> <img src="cards/2_after.jpg" width="49%">
 
-## − 3: possibly a blanket, removed
+## − 3: blanket, removed
 
-The object on the sofa (83 cm up), possibly a blanket, was removed.
+The beige blanket on the sofa (79 cm up) was removed.
 
-- Status: confirmed (the after video looked through 87 % of the points it could check).
-- Evidence: 221 points: 69 % looked through, 10 % surface seen, 20 % too few views.
+- Status: confirmed (the after video looked through 81 % of the points it could check).
+- Evidence: 207 points: 67 % looked through, 16 % surface seen, 18 % too few views.
 
 <img src="cards/3_before.jpg" width="49%"> <img src="cards/3_after.jpg" width="49%">
 
-## ? 4: shoe, removed
+## ? 4: possibly a slipper, removed
 
-The beige shoe on the shelf (50 cm up) may have been removed.
+The object on the chair (48 cm up), possibly a slipper, may have been removed.
 
-- Status: unverified (the after video looked through 38 % of it; at 5 cm tall, the rest cannot be told apart from the surface under it).
-- Evidence: 122 points: 38 % looked through, 62 % surface seen.
+- Status: unverified (the after video looked through 32 % of it; at 4 cm tall, the rest cannot be told apart from the surface under it).
+- Evidence: 117 points: 32 % looked through, 68 % surface seen.
 
 <img src="cards/4_before.jpg" width="49%"> <img src="cards/4_after.jpg" width="49%">
 
 ## Coverage
 
-The other video checked 70 % of the surface points. It had 7 % hidden and saw 22 % in fewer than three frames; the viewer can tint both.
+The other video checked 70 % of the surface points. It had 8 % hidden and saw 22 % in fewer than three frames; the viewer can tint both.
 
 ## Method
 

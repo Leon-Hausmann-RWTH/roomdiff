@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import tyro
-from clips import reencode
+from clips import copy_video
 from evaluate import naive
 from PIL import Image, ImageColor, ImageDraw
 from playwright.sync_api import sync_playwright
@@ -25,6 +25,16 @@ from roomdiff.report import COLORS, corners, font, kind, place_tag, ring
 
 # Software WebGL for headless Chromium.
 GL = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
+# Aim at the middle of all change boxes from the default direction, close enough to show them all.
+FRAME_CHANGES = """() => {
+  const ps = R.changes.flatMap(c => [c.box_before, c.box_after]).filter(Boolean)
+    .map(b => new THREE.Vector3(...b.center));
+  const mid = ps.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(ps.length);
+  const r = Math.max(1, ...ps.map(p => p.distanceTo(mid)));
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(mid);
+  camera.position.copy(mid).addScaledVector(dir, 2.6 * r);
+}"""
 SET_SLIDER = (
     "t => { const e = document.getElementById('edit'); e.value = t; e.dispatchEvent(new Event('input')); }"
 )
@@ -51,8 +61,7 @@ def slider_gif(viewer: Path, path: Path, frames: int = 40) -> None:
         page.wait_for_timeout(2500)
         page.get_by_role("button", name="Before", exact=True).click()
         page.locator("#showUnchecked").uncheck()
-        # Zoom in from the default overview and turn slowly.
-        page.evaluate("camera.position.lerp(controls.target, 0.4)")
+        page.evaluate(FRAME_CHANGES)
         page.evaluate("controls.autoRotate = true; controls.autoRotateSpeed = 0.25")
         for k in range(frames):
             t = min(1.0, max(0.0, (k - 6) / (frames - 18)))  # hold the before scene, sweep, hold the result
@@ -160,8 +169,8 @@ def main(args: Args) -> None:
     # The CLI's input checks, on the original files (the copies lose the HDR tag).
     notes = [n for p in (args.before, args.after) for n in check_video(p, args.config)]
     root = Path("examples") / args.name
-    before = reencode(args.before, root / "before.mp4")
-    after = reencode(args.after, root / "after.mp4")
+    before = copy_video(args.before, root / "before.mp4")
+    after = copy_video(args.after, root / "after.mp4")
     output = root / "output"
     res = analyse(before, after, args.config)
     res.warnings[:0] = notes

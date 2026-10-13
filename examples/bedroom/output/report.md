@@ -7,17 +7,17 @@ The camera was held 1.53 m above the floor. Positions and boxes are in changes.j
 
 | id | | type | name | status | sentence |
 |---|---|---|---|---|---|
-| 1 | → | moved | plastic bag | confirmed | The plastic bag moved 0.3 m along the desk. |
+| 1 | → | moved | plastic bag | confirmed | The plastic bag moved 0.4 m along the table and turned about 45 degrees. |
 | 2 | + | added | stuffed animal | confirmed | A yellow stuffed animal appeared on the shelf (84 cm up). |
-| 3 | + | added | water bottle | confirmed | A black water bottle appeared on the desk (85 cm up). |
+| 3 | + | added | water bottle | confirmed | A black water bottle appeared on the windowsill (85 cm up). |
 
 ## → 1: plastic bag, moved
 
-The plastic bag moved 0.3 m along the desk.
+The plastic bag moved 0.4 m along the table and turned about 45 degrees.
 
-- Status: confirmed (the after video looked through 97 % of the points it could check).
-- Motion: 0.33 m.
-- Evidence: 517 points: 64 % looked through, 2 % surface seen, 14 % hidden, 21 % too few views.
+- Status: confirmed (the after video looked through 99 % of the points it could check).
+- Motion: 0.36 m, turned 44 degrees.
+- Evidence: 358 points: 73 % looked through, 1 % surface seen, 7 % hidden, 20 % too few views.
 
 <img src="cards/1_before.jpg" width="49%"> <img src="cards/1_after.jpg" width="49%">
 
@@ -25,23 +25,23 @@ The plastic bag moved 0.3 m along the desk.
 
 A yellow stuffed animal appeared on the shelf (84 cm up).
 
-- Status: confirmed (the before video looked through 64 % of the points it could check).
-- Evidence: 232 points: 61 % looked through, 34 % surface seen, 5 % too few views.
+- Status: confirmed (the before video looked through 57 % of the points it could check).
+- Evidence: 243 points: 53 % looked through, 40 % surface seen, 7 % too few views.
 
 <img src="cards/2_before.jpg" width="49%"> <img src="cards/2_after.jpg" width="49%">
 
 ## + 3: water bottle, added
 
-A black water bottle appeared on the desk (85 cm up).
+A black water bottle appeared on the windowsill (85 cm up).
 
 - Status: confirmed (the before video looked through 100 % of the points it could check).
-- Evidence: 135 points: 100 % looked through.
+- Evidence: 129 points: 100 % looked through.
 
 <img src="cards/3_before.jpg" width="49%"> <img src="cards/3_after.jpg" width="49%">
 
 ## Coverage
 
-The other video checked 72 % of the surface points. It had 10 % hidden and saw 18 % in fewer than three frames; the viewer can tint both.
+The other video checked 73 % of the surface points. It had 9 % hidden and saw 18 % in fewer than three frames; the viewer can tint both.
 
 ## Method
 

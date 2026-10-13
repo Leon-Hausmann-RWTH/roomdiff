@@ -31,3 +31,16 @@ def reencode(src: Path, dst: Path, part: tuple[float, float] = (0.0, 1.0)) -> Pa
         out.mux(enc.encode())
     tmp.replace(dst)
     return dst
+
+
+def copy_video(src: Path, dst: Path) -> Path:
+    """The video track exactly as recorded, without audio or metadata tracks."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with av.open(str(src)) as container, av.open(str(dst), "w") as out:
+        stream = container.streams.video[0]
+        copy = out.add_stream_from_template(stream)
+        for packet in container.demux(stream):
+            if packet.dts is not None:  # the demuxer ends with an empty flush packet
+                packet.stream = copy
+                out.mux(packet)
+    return dst

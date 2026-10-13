@@ -1,0 +1,317 @@
+{
+ "before": "before.mp4",
+ "after": "after.mp4",
+ "frame": "One frame for both videos, new for each run: metres, right-handed, z up, x along one of the main wall directions, origin below the middle of the scene, floor at z = 0.",
+ "camera_height_m": 1.27,
+ "floor_found": true,
+ "warnings": [
+  "before.MOV is HDR video; record with HDR Video off for true colours",
+  "after.MOV is HDR video; record with HDR Video off for true colours",
+  "both videos look in almost one direction; gravity comes from surface normals"
+ ],
+ "counts": {
+  "moved": 1,
+  "added": 2,
+  "removed": 3,
+  "unverified": 0
+ },
+ "changes": [
+  {
+   "id": 1,
+   "type": "moved",
+   "status": "confirmed",
+   "reason": "the after video looked through 95 % of the points it could check",
+   "label": "chair",
+   "label_score": 0.369,
+   "title": "chair",
+   "sentence": "The chair moved 1.6 m across the floor and turned about 50 degrees, blocking 0.48 m\u00b2 of floor.",
+   "box_before": {
+    "center": [
+     0.506,
+     -0.508,
+     0.354
+    ],
+    "size": [
+     0.657,
+     0.541,
+     0.709
+    ],
+    "yaw": 2.682
+   },
+   "box_after": {
+    "center": [
+     0.544,
+     1.08,
+     0.36
+    ],
+    "size": [
+     0.899,
+     0.533,
+     0.721
+    ],
+    "yaw": 2.856
+   },
+   "motion": {
+    "distance_m": 1.62,
+    "turn_deg": -51,
+    "fit": 0.86,
+    "in_place": false
+   },
+   "transform": {
+    "yaw": -0.8822,
+    "t": [
+     0.7791,
+     1.819,
+     0.0026
+    ]
+   },
+   "support": {
+    "before": {
+     "name": "floor",
+     "height_m": 0.0
+    },
+    "after": {
+     "name": "floor",
+     "height_m": 0.0
+    }
+   },
+   "floor_blocked_m2": 0.48,
+   "evidence": {
+    "free": 0.886,
+    "seen": 0.05,
+    "occluded": 0.0,
+    "unreached": 0.064,
+    "points": 2969
+   },
+   "cards": {
+    "before": "cards/1_before.jpg",
+    "after": "cards/1_after.jpg"
+   }
+  },
+  {
+   "id": 2,
+   "type": "removed",
+   "status": "confirmed",
+   "reason": "the after video looked through 100 % of the points it could check",
+   "label": "stool",
+   "label_score": 0.623,
+   "title": "stool",
+   "sentence": "The white stool on the floor was removed.",
+   "box_before": {
+    "center": [
+     0.12,
+     -1.536,
+     0.259
+    ],
+    "size": [
+     0.544,
+     0.282,
+     0.518
+    ],
+    "yaw": 3.087
+   },
+   "box_after": null,
+   "motion": null,
+   "transform": null,
+   "support": {
+    "before": {
+     "name": "floor",
+     "height_m": 0.0
+    }
+   },
+   "floor_blocked_m2": null,
+   "evidence": {
+    "free": 0.992,
+    "seen": 0.0,
+    "occluded": 0.0,
+    "unreached": 0.008,
+    "points": 1431
+   },
+   "cards": {
+    "before": "cards/2_before.jpg",
+    "after": "cards/2_after.jpg"
+   }
+  },
+  {
+   "id": 3,
+   "type": "removed",
+   "status": "confirmed",
+   "reason": "the after video looked through 100 % of the points it could check",
+   "label": "candle",
+   "label_score": 0.558,
+   "title": "candle",
+   "sentence": "The candle on the coffee table (29 cm up) was removed.",
+   "box_before": {
+    "center": [
+     -1.054,
+     -0.187,
+     0.444
+    ],
+    "size": [
+     0.317,
+     0.076,
+     0.323
+    ],
+    "yaw": 3.136
+   },
+   "box_after": null,
+   "motion": null,
+   "transform": null,
+   "support": {
+    "before": {
+     "name": "coffee table",
+     "height_m": 0.29
+    }
+   },
+   "floor_blocked_m2": null,
+   "evidence": {
+    "free": 0.906,
+    "seen": 0.0,
+    "occluded": 0.0,
+    "unreached": 0.094,
+    "points": 171
+   },
+   "cards": {
+    "before": "cards/3_before.jpg",
+    "after": "cards/3_after.jpg"
+   }
+  },
+  {
+   "id": 4,
+   "type": "removed",
+   "status": "confirmed",
+   "reason": "the after video looked through 100 % of the points it could check",
+   "label": "coffee maker",
+   "label_score": 0.056,
+   "title": "possibly a coffee maker",
+   "sentence": "The object on the floor, possibly a coffee maker, was removed.",
+   "box_before": {
+    "center": [
+     -2.331,
+     -1.138,
+     0.068
+    ],
+    "size": [
+     0.23,
+     0.106,
+     0.137
+    ],
+    "yaw": 2.759
+   },
+   "box_after": null,
+   "motion": null,
+   "transform": null,
+   "support": {
+    "before": {
+     "name": "floor",
+     "height_m": 0.0
+    }
+   },
+   "floor_blocked_m2": null,
+   "evidence": {
+    "free": 1.0,
+    "seen": 0.0,
+    "occluded": 0.0,
+    "unreached": 0.0,
+    "points": 20
+   },
+   "cards": {
+    "before": "cards/4_before.jpg",
+    "after": "cards/4_after.jpg"
+   }
+  },
+  {
+   "id": 5,
+   "type": "added",
+   "status": "confirmed",
+   "reason": "the before video looked through 100 % of the points it could check",
+   "label": "backpack",
+   "label_score": 0.898,
+   "title": "backpack",
+   "sentence": "A black backpack appeared on the floor, blocking 0.06 m\u00b2 of floor.",
+   "box_before": null,
+   "box_after": {
+    "center": [
+     0.227,
+     -1.027,
+     0.193
+    ],
+    "size": [
+     0.4,
+     0.139,
+     0.387
+    ],
+    "yaw": 1.618
+   },
+   "motion": null,
+   "transform": null,
+   "support": {
+    "after": {
+     "name": "floor",
+     "height_m": 0.0
+    }
+   },
+   "floor_blocked_m2": 0.06,
+   "evidence": {
+    "free": 1.0,
+    "seen": 0.0,
+    "occluded": 0.0,
+    "unreached": 0.0,
+    "points": 565
+   },
+   "cards": {
+    "before": "cards/5_before.jpg",
+    "after": "cards/5_after.jpg"
+   }
+  },
+  {
+   "id": 6,
+   "type": "added",
+   "status": "confirmed",
+   "reason": "the before video looked through 60 % of the points it could check",
+   "label": "rocking chair",
+   "label_score": 0.233,
+   "title": "possibly a rocking chair",
+   "sentence": "An object, possibly a rocking chair, appeared on the floor, blocking 0.09 m\u00b2 of floor.",
+   "box_before": null,
+   "box_after": {
+    "center": [
+     -0.506,
+     2.042,
+     0.138
+    ],
+    "size": [
+     0.435,
+     0.201,
+     0.276
+    ],
+    "yaw": 2.358
+   },
+   "motion": null,
+   "transform": null,
+   "support": {
+    "after": {
+     "name": "floor",
+     "height_m": 0.0
+    }
+   },
+   "floor_blocked_m2": 0.09,
+   "evidence": {
+    "free": 0.566,
+    "seen": 0.384,
+    "occluded": 0.0,
+    "unreached": 0.05,
+    "points": 341
+   },
+   "cards": {
+    "before": "cards/6_before.jpg",
+    "after": "cards/6_after.jpg"
+   }
+  }
+ ],
+ "coverage": {
+  "checked": 0.864,
+  "hidden": 0.038,
+  "unchecked": 0.098
+ }
+}

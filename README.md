@@ -4,24 +4,26 @@ roomdiff compares two phone videos of a room and shows in 3D what was moved, add
 
 ![The confirmed edits applied to the before scene](docs/media/edit_slider.gif)
 
-*Living-room example: the edits applied to the before scene. The cushion moves 1.6 m along the sofa. The stool and the top of the coat disappear.*
+*Own iPhone recording: the edits applied to the before scene. The chair moves 1.6 m and turns, the stool and the candle holder disappear, and a backpack appears.*
 
 ## Examples
 
-- 3D viewer: [living room](docs/living_room.html), [bedroom](docs/bedroom.html). Download and open in a browser, or serve `docs/` with GitHub Pages.
-- Report: [living room](examples/living_room/output/report.md), [bedroom](examples/bedroom/output/report.md).
+- 3D viewer: [my room](docs/my_room.html), [living room](docs/living_room.html), [bedroom](docs/bedroom.html). Download and open in a browser, or serve `docs/` with GitHub Pages.
+- Report: [my room](examples/my_room/output/report.md), [living room](examples/living_room/output/report.md), [bedroom](examples/bedroom/output/report.md).
 
 ![Top view of the changes](docs/media/floorplan.png)
 
 ![Before and after frames of each change](docs/media/cards.jpg)
 
-Both pairs come from the SceneDiff benchmark, so the misses are known. In the living room roomdiff finds 4 of 7 changes. It misses a loaf of bread, a tissue box and a remote, and it calls a tote bag "the beige shoe on the shelf". In the bedroom it finds 3 of 4 and misses a flat cable.
+The main example is a pair of 16 s iPhone videos filmed for this project. Between them a chair was moved and turned, a stool and a 40 cm candle holder were taken away, and a backpack was put on the floor. roomdiff finds all four with the right type. It also reports two changes that did not happen: the chair's reflection in the glass door next to its new place, and a small cluster of 20 points.
+
+The other two examples come from the SceneDiff benchmark, so the misses are known. In the living room roomdiff finds 4 of 7 changes. It misses a loaf of bread, a tissue box and a remote, and calls a tote bag a slipper. In the bedroom it finds 3 of 4 and misses a flat cable.
 
 ## Quickstart
 
 ```bash
 uv sync
-uv run roomdiff run examples/living_room/before.mp4 examples/living_room/after.mp4 --out runs/demo
+uv run roomdiff run examples/my_room/before.mp4 examples/my_room/after.mp4 --out runs/demo
 open runs/demo/viewer.html
 ```
 
@@ -53,7 +55,7 @@ The output folder holds `viewer.html`, `report.md`, `floorplan.png`, `changes.js
 | changes between two halves of one video (6 unchanged rooms) | 0 | 37 |
 | SceneDiff metrics: px/im IoU, obj/im AP, obj/sc AP | 42.7, 28.0, 15.7 | |
 
-Thresholds were set on 4 other SceneDiff pairs (living_room_1_2, bedroom_2_4, lounge_1_2, living_room_35_36) and on the living-room example. The figure shows why the baseline reports so much on the living-room pair: of its 29 regions, the other video looked through only 6, and 5 of them make up the 4 changes.
+Thresholds were set on 4 other SceneDiff pairs (living_room_1_2, bedroom_2_4, lounge_1_2, living_room_35_36) and on the living-room example. The figure shows why the baseline reports so much on the main example: of its 51 regions, the other video looked through only 5, and those make up the 4 real changes.
 
 ![Where the two videos disagree](docs/media/evidence_example.png)
 

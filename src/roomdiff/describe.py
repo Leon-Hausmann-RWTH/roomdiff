@@ -36,6 +36,8 @@ def support(o: Obj, cloud: Cloud, state: np.ndarray, taken: np.ndarray, floor_fo
     if under.sum() < 10:
         return {"name": None, "height_m": max(0.0, round(bottom, 2)), "points": None}
     height = max(0.0, round(float(np.median(z[under])), 2))
+    if floor_found and height < 0.08:  # thin legs leave no low points; the surface under them is the floor
+        return {"name": "floor", "height_m": 0.0, "points": None}
     return {"name": None, "height_m": height, "points": np.nonzero(under)[0]}
 
 
