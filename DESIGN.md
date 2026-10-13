@@ -2,7 +2,7 @@
 
 ## Idea
 
-A surface counts as gone only where the other video looked through the place it occupied: the other video's depth along those rays lies beyond it. This is evidence of absence, as in Fehr et al. (ICRA 2017) and Khronos (RSS 2024); the per-pixel test is SceneDiff's `foreground_distance`. A nearer surface means the spot was hidden, and too few views mean it was not checked. Neither can produce a change. The same test runs in both directions. The rest of the pipeline counts these votes per point and per object.
+A surface counts as gone only where the other video looked through the place it occupied: the other video's depth along those rays lies beyond it. This is evidence of absence, as in Fehr et al. (ICRA 2017) and Khronos (RSS 2024); the per-pixel test is SceneDiff's `foreground_distance`. A nearer surface means the spot was hidden; fewer than three deciding frames mean too few views. Both count as not checked, and neither can produce a change. The same test runs in both directions. The rest of the pipeline counts these votes per point and per object.
 
 SceneDiff also reconstructs both videos jointly and uses SAM and DINO, but it scores unobserved pixels as unchanged and outputs 2D masks. OASIS-Map keeps an unknown state per object but needs LiDAR poses. roomdiff adds votes over several camera positions, a verdict with a reason for each object, sentences built from measured geometry, and outputs that mark what was not checked.
 
@@ -27,7 +27,7 @@ Objects under 8 cm stay inside the depth band of 4 cm plus 3 % of the depth (27 
 
 ## Reproduce
 
-Unpack `scenediff_benchmark.zip` from the dataset page into `data/scenediff_benchmark/`. The commands below score the 18 report pairs, run the controls (each pair's first video split in two) and run SceneDiff's evaluator:
+Unpack `scenediff_benchmark.zip` (11.9 GB) from the dataset page with `unzip scenediff_benchmark.zip -d data/`, so that `data/scenediff_benchmark/data/<pair>/` exists. The commands below score the 18 report pairs, run the controls (each pair's first video split in two) and run SceneDiff's evaluator:
 
 ```bash
 uv run python scripts/evaluate.py --set report --official

@@ -11,17 +11,17 @@
   <rect x="150" y="215" width="70" height="75" fill="none" stroke="#D55E00" stroke-width="2.5" stroke-dasharray="6 4"/>
   <line x1="612" y1="175" x2="43" y2="270" stroke="#D55E00" stroke-width="1.8"/>
   <circle cx="220" cy="240" r="5" fill="#D55E00"/>
-  <text x="60" y="314" fill="#D55E00">free (looked through): the ray passes where the box was and hits the wall</text>
+  <text x="60" y="314" fill="#D55E00">looked through: the ray passes where the box was and hits the wall</text>
   <rect x="300" y="120" width="60" height="40" fill="#bdbdbd"/>
   <line x1="612" y1="175" x2="362" y2="140" stroke="#2e7d32" stroke-width="1.8"/>
   <circle cx="360" cy="140" r="5" fill="#2e7d32"/>
-  <text x="270" y="184" fill="#2e7d32">seen (surface seen): depth agrees</text>
+  <text x="270" y="184" fill="#2e7d32">surface seen: depth agrees</text>
   <rect x="420" y="40" width="22" height="80" fill="#757575"/>
   <line x1="612" y1="175" x2="443" y2="109" stroke="#8a8a8a" stroke-width="1.8"/>
   <line x1="420" y1="100" x2="345" y2="72" stroke="#8a8a8a" stroke-width="1.4" stroke-dasharray="3 4"/>
   <circle cx="340" cy="70" r="5" fill="#8a8a8a"/>
-  <text x="100" y="40" fill="#616161">occluded (hidden): a nearer surface blocks it</text>
+  <text x="100" y="40" fill="#616161">hidden: a nearer surface blocks it</text>
   <circle cx="575" cy="40" r="5" fill="#8a8a8a"/>
-  <text x="420" y="22" fill="#616161">unreached (too few views): under 3 frames decide</text>
-  <text x="60" y="334" fill="#424242" font-size="12">Dots: surfaces the before video saw. Only free points can start a change; occluded and unreached say nothing.</text>
+  <text x="420" y="22" fill="#616161">too few views: under 3 frames decide</text>
+  <text x="60" y="334" fill="#424242" font-size="12">Dots: surfaces the before video saw. Only looked-through points can start a change; hidden and too few views say nothing.</text>
 </svg>

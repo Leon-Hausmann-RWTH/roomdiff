@@ -1,6 +1,6 @@
 # My room example
 
-Two 16 s videos of a living room, filmed with an iPhone (1080p, HDR) for this project. Video as recorded.
+Two 16 s videos of a living room, filmed with an iPhone (1080p) for this project. Video as recorded. HDR Video could not be switched off, so the report warns about colours.
 
 - Outputs: [report](output/report.md), [changes.json](output/changes.json), [top view](output/floorplan.png). The viewer `output/viewer.html` opens after download.
 - Rerun: `uv run roomdiff run examples/my_room/before.mp4 examples/my_room/after.mp4 --out runs/my_room`

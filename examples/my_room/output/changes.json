@@ -7,7 +7,7 @@
  "warnings": [
   "before.mp4 is HDR video; record with HDR Video off for true colours",
   "after.mp4 is HDR video; record with HDR Video off for true colours",
-  "both videos look in almost one direction; gravity comes from surface normals"
+  "both videos look in almost one direction, so up was estimated from the surfaces"
  ],
  "counts": {
   "moved": 1,

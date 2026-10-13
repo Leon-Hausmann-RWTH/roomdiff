@@ -4,7 +4,7 @@ roomdiff compares two phone videos of a room and shows in 3D what was moved, add
 
 ![The confirmed edits applied to the before scene](docs/media/edit_slider.gif)
 
-*Own iPhone recording: the edits applied to the before scene. The chair moves 1.6 m and turns, the stool and the candle holder disappear, and a backpack appears.*
+*Own iPhone recording: the detected changes applied to the before scene. The chair moves 1.6 m and turns, the stool and the candle holder disappear, and a backpack appears. Tags 4 and 6 are false (see below).*
 
 ## Examples
 
@@ -36,8 +36,8 @@ The output folder holds `viewer.html`, `report.md`, `floorplan.png`, `changes.js
 ![Ray evidence](docs/media/evidence.svg)
 
 1. **One 3D frame.** Pi3X reconstructs the keyframes of both videos in one pass, with depth and camera poses in one metric frame, z up.
-2. **Evidence of absence.** Each surface point of the before video is tested against the after frames. If the after camera saw past it, the point is free. If something closer blocked the view, it is hidden, and if fewer than three frames saw it, it is not checked. Only free points can start a change. The same test runs in reverse for additions.
-3. **Objects.** SAM 2.1 turns each group of free points into an object. It is confirmed when the other video looked through at least half of what it could check, dropped below a fifth, and otherwise reported as unverified with the reason.
+2. **Evidence of absence.** Each surface point of the before video is tested against the after frames. If the after camera saw past it, the point is free. If something closer blocked the view, it is hidden, and if fewer than three frames saw it, it has too few views. Both count as not checked. Only free points can start a change. The same test runs in reverse for additions.
+3. **Objects.** SAM 2.1 turns each group of free points into an object. It is confirmed when the other video looked through at least half of the points it could check, and dropped when it looked through less than a fifth. Otherwise it is reported as unverified, with the reason.
 4. **Moves.** A removed and an added object that look alike (DINOv2) and fit with a rigid transform become one move with a distance and a turn.
 5. **Words.** SigLIP 2 names the object and what it stands on. Heights, distances and colours are measured. No language model decides what changed.
 
@@ -48,7 +48,7 @@ The output folder holds `viewer.html`, `report.md`, `floorplan.png`, `changes.js
 | | roomdiff | baseline |
 |---|---|---|
 | changes reported | 54 | 435 |
-| recall (objects 8 cm or taller) | 0.62 (0.77) | 0.72 (0.94) |
+| recall, all (8 cm or taller) | 0.62 (0.77) | 0.72 (0.94) |
 | precision | 0.57 | 0.08 |
 | false changes where the other video saw too little | 1 | 183 |
 | correct type (moved, added, removed) | 0.61 | 0.47 |
@@ -63,7 +63,7 @@ Thresholds were set on 4 other SceneDiff pairs (living_room_1_2, bedroom_2_4, lo
 
 ## Your own videos
 
-- Film two videos of the same room, 10 to 20 s each, in the same light. Use landscape, turn HDR Video off and lock exposure.
+- Film two videos of the same room, 10 to 20 s each, in the same light. Use landscape, turn HDR Video off if the phone offers it, and lock exposure.
 - Walk at least 1 m sideways instead of turning on the spot, and pass every place that changes. Film the second video along a slightly different path.
 - Change objects at least 10 cm tall.
 - Run `uv run roomdiff run before.MOV after.MOV --out runs/mine`.
@@ -89,4 +89,4 @@ Code: MIT. Model weights are downloaded at run time, each pinned to a revision.
 | SigLIP 2 large | names | Apache-2.0 |
 | three.js r147 | viewer | MIT |
 
-Example videos: SceneDiff (Wu et al., arXiv 2512.16908), MIT. The ray test follows SceneDiff's `foreground_distance` and Khronos (Schmid et al., RSS 2024).
+Example videos: my_room was filmed for this project; living_room and bedroom come from SceneDiff (Wu et al., arXiv 2512.16908), MIT. The ray test follows SceneDiff's `foreground_distance` and Khronos (Schmid et al., RSS 2024).

@@ -7,7 +7,7 @@ Warning: before.mp4 is HDR video; record with HDR Video off for true colours.
 
 Warning: after.mp4 is HDR video; record with HDR Video off for true colours.
 
-Warning: both videos look in almost one direction; gravity comes from surface normals.
+Warning: both videos look in almost one direction, so up was estimated from the surfaces.
 
 ![Top view of the changes](floorplan.png)
 
@@ -26,7 +26,6 @@ The chair moved 1.6 m across the floor and turned about 50 degrees, blocking 0.4
 
 - Status: confirmed (the after video looked through 95 % of the points it could check).
 - Motion: 1.62 m, turned -51 degrees.
-- Floor now blocked: 0.48 m².
 - Evidence: 2,969 points: 89 % looked through, 5 % surface seen, 6 % too few views.
 
 <img src="cards/1_before.jpg" width="49%"> <img src="cards/1_after.jpg" width="49%">
@@ -63,7 +62,6 @@ The object on the floor, possibly a coffee maker, was removed.
 A black backpack appeared on the floor, blocking 0.06 m² of floor.
 
 - Status: confirmed (the before video looked through 100 % of the points it could check).
-- Floor now blocked: 0.06 m².
 - Evidence: 565 points: 100 % looked through.
 
 <img src="cards/5_before.jpg" width="49%"> <img src="cards/5_after.jpg" width="49%">
@@ -73,7 +71,6 @@ A black backpack appeared on the floor, blocking 0.06 m² of floor.
 An object, possibly a rocking chair, appeared on the floor, blocking 0.09 m² of floor.
 
 - Status: confirmed (the before video looked through 60 % of the points it could check).
-- Floor now blocked: 0.09 m².
 - Evidence: 341 points: 57 % looked through, 38 % surface seen, 5 % too few views.
 
 <img src="cards/6_before.jpg" width="49%"> <img src="cards/6_after.jpg" width="49%">

@@ -73,7 +73,7 @@
     <div class="hint" id="hint"></div>
     <div class="edit">
       <button id="play" title="Play the edits">&#9654;</button>
-      <input id="edit" type="range" min="0" max="1" step="0.01" value="0" aria-label="Share of the detected edits applied to the before scene">
+      <input id="edit" type="range" min="0" max="1" step="0.01" value="0" aria-label="Share of the confirmed edits applied to the before scene">
       <span id="editval">0 %</span>
     </div>
     <div class="hint">The slider applies the confirmed edits to the before scene.</div>
@@ -97,7 +97,7 @@ const STYLE = { removed: ['#D55E00', '−'], added: ['#0072B2', '+'], moved: ['#
 const VIDEO = { before: '#009E73', after: '#E69F00' };
 const SIDES = ['before', 'after'];
 const HINTS = {
-  Before: 'Before video in its own colours. Move the slider to apply the detected edits.',
+  Before: 'Before video in its own colours.',
   After: 'After video in its own colours. Boxes without points mark places that are now empty.',
   Overlay: 'Both videos: before in green, after in amber.',
   Changes: 'Unchanged points in grey, changes in colour. The old place of a moved object is pale.',
@@ -397,6 +397,13 @@ $('coverage').textContent = `The other video checked ${pct(cov.checked)} of the 
 const c0 = DATA.center, r0 = DATA.radius;
 controls.target.set(c0[0], c0[1], c0[2] - 0.2);
 camera.position.set(c0[0] + 0.4 * r0, c0[1] - 0.45 * r0, c0[2] + 0.62 * r0);
+// Start on the changes: the middle of the cloud can lie metres away from them.
+const ends = R.changes.flatMap(c => [c.box_before, c.box_after]).filter(Boolean).map(b => new THREE.Vector3(...b.center));
+if (ends.length) {
+  const mid = ends.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(ends.length);
+  camera.position.sub(controls.target).setLength(2.6 * Math.max(1, ...ends.map(p => p.distanceTo(mid)))).add(mid);
+  controls.target.copy(mid);
+}
 
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;

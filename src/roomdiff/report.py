@@ -281,14 +281,13 @@ def write_report(path: Path, result: dict) -> None:
     }
     rows, sections = [], []
     for c in result["changes"]:
-        mo, e, g, blocked = c["motion"], c["evidence"], GLYPHS[kind(c)], c["floor_blocked_m2"]
+        mo, e, g = c["motion"], c["evidence"], GLYPHS[kind(c)]
         rows.append(f"| {c['id']} | {g} | {c['type']} | {c['title']} | {c['status']} | {c['sentence']} |")
         turn = f", turned {mo['turn_deg']:.0f} degrees" if mo and mo["turn_deg"] is not None else ""
         shares = ", ".join(f"{pct(e[k])} {v}" for k, v in words.items() if round(100 * e[k]))
         facts = [
             f"Status: {c['status']} ({c['reason']}).",
             mo and f"Motion: {mo['distance_m']:.2f} m{turn}.",
-            blocked and f"Floor now blocked: {blocked:.2f} m².",
             f"Evidence: {e['points']:,} points: {shares}.",
         ]
         cards = [f'<img src="{p}" width="49%">' if p else f"(no {s} view)" for s, p in c["cards"].items()]

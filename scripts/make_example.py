@@ -25,16 +25,6 @@ from roomdiff.report import COLORS, corners, font, kind, place_tag, ring
 
 # Software WebGL for headless Chromium.
 GL = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
-# Aim at the middle of all change boxes from the default direction, close enough to show them all.
-FRAME_CHANGES = """() => {
-  const ps = R.changes.flatMap(c => [c.box_before, c.box_after]).filter(Boolean)
-    .map(b => new THREE.Vector3(...b.center));
-  const mid = ps.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(ps.length);
-  const r = Math.max(1, ...ps.map(p => p.distanceTo(mid)));
-  const dir = camera.position.clone().sub(controls.target).normalize();
-  controls.target.copy(mid);
-  camera.position.copy(mid).addScaledVector(dir, 2.6 * r);
-}"""
 SET_SLIDER = (
     "t => { const e = document.getElementById('edit'); e.value = t; e.dispatchEvent(new Event('input')); }"
 )
@@ -61,7 +51,6 @@ def slider_gif(viewer: Path, path: Path, frames: int = 40) -> None:
         page.wait_for_timeout(2500)
         page.get_by_role("button", name="Before", exact=True).click()
         page.locator("#showUnchecked").uncheck()
-        page.evaluate(FRAME_CHANGES)
         page.evaluate("controls.autoRotate = true; controls.autoRotateSpeed = 0.25")
         for k in range(frames):
             t = min(1.0, max(0.0, (k - 6) / (frames - 18)))  # hold the before scene, sweep, hold the result
@@ -78,10 +67,13 @@ def slider_gif(viewer: Path, path: Path, frames: int = 40) -> None:
     print(f"{path}: {path.stat().st_size / 1e6:.1f} MB")
 
 
-def card_strip(output: Path, result: dict, path: Path, n: int = 3) -> None:
-    """Before and after cards side by side, one row for each of the first n changes that have both."""
-    rows = []
-    for c in [c for c in result["changes"] if all(c["cards"].values())][:n]:
+def card_strip(output: Path, result: dict, path: Path) -> None:
+    """Before and after cards side by side: the first moved, removed and added change that has both."""
+    rows, first = [], {}
+    for c in result["changes"]:
+        if all(c["cards"].values()):
+            first.setdefault(c["type"], c)
+    for c in first.values():
         pair = [Image.open(output / c["cards"][side]) for side in ("before", "after")]
         pair = [im.resize((round(im.width * 300 / im.height), 300)) for im in pair]
         rows.append(np.concatenate([np.asarray(im) for im in pair], 1))

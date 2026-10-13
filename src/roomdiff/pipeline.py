@@ -68,7 +68,7 @@ def analyse(before: Path, after: Path, cfg: Config, required=((), ())) -> Result
     ground = "the floor" if frame.floor_found else "z = 0"
     print(f"world frame: camera {frame.camera_height:.2f} m above {ground} ({time.time() - t:.1f} s)")
     if not frame.up_from_cameras:
-        warn("both videos look in almost one direction; gravity comes from surface normals")
+        warn("both videos look in almost one direction, so up was estimated from the surfaces")
     if not frame.floor_found:
         warn("no plausible floor plane: heights count from z = 0 (see frame); nothing is put on the floor")
 
